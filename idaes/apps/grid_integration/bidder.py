@@ -241,6 +241,7 @@ class StochasticProgramBidder(AbstractBidder):
         solver,
         forecaster,
         real_time_underbid_penalty,
+        real_time_participation_only,
     ):
 
         """
@@ -261,6 +262,8 @@ class StochasticProgramBidder(AbstractBidder):
 
             real_time_underbid_penalty: penalty for RT power bid that's less than DA power bid, non-negative
 
+            real_time_participation_only: bool, if true, the bidder only participate in the real-time market. 
+
         Returns:
             None
         """
@@ -272,6 +275,7 @@ class StochasticProgramBidder(AbstractBidder):
         self.solver = solver
         self.forecaster = forecaster
         self.real_time_underbid_penalty = real_time_underbid_penalty
+        self.real_time_participation_only = real_time_participation_only
 
         self._check_inputs()
 
@@ -618,28 +622,34 @@ class StochasticProgramBidder(AbstractBidder):
             None
         """
 
-        time_index = self.real_time_model.fs[0].day_ahead_energy_price.index_set()
+        if not self.real_time_participation_only:
 
-        # forecast the day-ahead price, if not enough realized data
-        if len(realized_day_ahead_prices[hour:]) < len(time_index):
-            forecasts = self.forecaster.forecast_day_ahead_prices(
-                date=date + datetime.timedelta(days=1),
-                hour=0,
-                bus=self.bidding_model_object.model_data.bus,
-                horizon=self.day_ahead_horizon,
-                n_samples=self.n_scenario,
-            )
+            time_index = self.real_time_model.fs[0].day_ahead_energy_price.index_set()
 
-        for s in self.real_time_model.SCENARIOS:
-            for t in time_index:
-                try:
-                    price = realized_day_ahead_prices[t + hour]
-                except IndexError:
-                    self.real_time_model.fs[s].day_ahead_energy_price[t] = forecasts[s][
-                        (t + hour) - 24
-                    ]
-                else:
-                    self.real_time_model.fs[s].day_ahead_energy_price[t] = price
+            # forecast the day-ahead price, if not enough realized data
+            if len(realized_day_ahead_prices[hour:]) < len(time_index):
+                forecasts = self.forecaster.forecast_day_ahead_prices(
+                    date=date + datetime.timedelta(days=1),
+                    hour=0,
+                    bus=self.bidding_model_object.model_data.bus,
+                    horizon=self.day_ahead_horizon,
+                    n_samples=self.n_scenario,
+                )
+
+            for s in self.real_time_model.SCENARIOS:
+                for t in time_index:
+                    try:
+                        price = realized_day_ahead_prices[t + hour]
+                    except IndexError:
+                        self.real_time_model.fs[s].day_ahead_energy_price[t] = forecasts[s][
+                            (t + hour) - 24
+                        ]
+                    else:
+                        self.real_time_model.fs[s].day_ahead_energy_price[t] = price
+        else:
+            for s in self.real_time_model.SCENARIOS:
+                for t in time_index:
+                    self.real_time_model.fs[s].day_ahead_energy_price[t] = 0
 
     def _pass_realized_day_ahead_dispatches(self, realized_day_ahead_dispatches, hour):
 
@@ -655,19 +665,23 @@ class StochasticProgramBidder(AbstractBidder):
             None
         """
 
-        time_index = self.real_time_model.fs[0].day_ahead_power.index_set()
-        for s in self.real_time_model.SCENARIOS:
-            for t in time_index:
-                try:
-                    dispatch = realized_day_ahead_dispatches[t + hour]
-                except IndexError:
-                    self.real_time_model.fs[s].day_ahead_power[t].unfix()
-                    # unrelax the DA offering UB
-                    self.real_time_model.fs[s].real_time_underbid_power[t].fix(0)
-                else:
-                    self.real_time_model.fs[s].day_ahead_power[t].fix(dispatch)
-                    # relax the DA offering UB
-                    self.real_time_model.fs[s].real_time_underbid_power[t].unfix()
+        if not self.real_time_participation_only:
+            time_index = self.real_time_model.fs[0].day_ahead_power.index_set()
+            for s in self.real_time_model.SCENARIOS:
+                for t in time_index:
+                    try:
+                        dispatch = realized_day_ahead_dispatches[t + hour]
+                    except IndexError:
+                        self.real_time_model.fs[s].day_ahead_power[t].unfix()
+                        # unrelax the DA offering UB
+                        self.real_time_model.fs[s].real_time_underbid_power[t].fix(0)
+                    else:
+                        self.real_time_model.fs[s].day_ahead_power[t].fix(dispatch)
+                        # relax the DA offering UB
+                        self.real_time_model.fs[s].real_time_underbid_power[t].unfix()
+        else:
+            self.real_time_model.fs[s].day_ahead_power[t].fix(0)
+            self.real_time_model.fs[s].real_time_underbid_power[t].unfix()
 
     def update_day_ahead_model(self, **kwargs):
 
