@@ -339,6 +339,8 @@ day_ahead_bidding_horizon = 48
 real_time_bidding_horizon = 4
 n_scenario = 10
 n_tracking_hour = 1
+real_time_underbid_penalty = 10000
+real_time_participation_only = True
 solver = pyo.SolverFactory("cbc")
 
 
@@ -401,6 +403,8 @@ def make_testing_bidder():
         n_scenario=n_scenario,
         solver=solver,
         forecaster=forecaster,
+        real_time_underbid_penalty=real_time_underbid_penalty,
+        real_time_participation_only=real_time_participation_only
     )
 
     return thermal_bidder

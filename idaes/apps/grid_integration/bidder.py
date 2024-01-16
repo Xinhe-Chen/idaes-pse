@@ -1059,7 +1059,8 @@ class Bidder(StochasticProgramBidder):
         n_scenario,
         solver,
         forecaster,
-        real_time_underbid_penalty=10000,
+        real_time_underbid_penalty,
+        real_time_participation_only
     ):
 
         """
@@ -1092,6 +1093,7 @@ class Bidder(StochasticProgramBidder):
             solver,
             forecaster,
             real_time_underbid_penalty,
+            real_time_participation_only,
         )
 
     def _add_DA_bidding_constraints(self, model):
