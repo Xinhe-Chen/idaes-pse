@@ -647,6 +647,7 @@ class StochasticProgramBidder(AbstractBidder):
                     else:
                         self.real_time_model.fs[s].day_ahead_energy_price[t] = price
         else:
+            time_index = self.real_time_model.fs[0].day_ahead_energy_price.index_set()
             for s in self.real_time_model.SCENARIOS:
                 for t in time_index:
                     self.real_time_model.fs[s].day_ahead_energy_price[t] = 0
