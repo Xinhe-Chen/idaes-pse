@@ -680,6 +680,7 @@ class StochasticProgramBidder(AbstractBidder):
                         # relax the DA offering UB
                         self.real_time_model.fs[s].real_time_underbid_power[t].unfix()
         else:
+            time_index = self.real_time_model.fs[0].day_ahead_power.index_set()
             for s in self.real_time_model.SCENARIOS:
                 for t in time_index:
                     self.real_time_model.fs[s].day_ahead_power[t].fix(0)
