@@ -272,7 +272,7 @@ class Tracker:
         weight = self.tracking_model_object.total_cost[1]
 
         for t in self.time_set:
-            self.model.obj.expr += weight * cost[t] + self.model.deviation_penalty[
+            self.model.obj.expr += 1/(2**t) * weight * cost[t] + self.model.deviation_penalty[
                 t
             ] * (self.model.power_underdelivered[t] + self.model.power_overdelivered[t])
 
