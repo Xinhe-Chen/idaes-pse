@@ -58,7 +58,8 @@ n_scenario = 3
 
 day_ahead_horizon = horizon
 real_time_horizon = horizon
-real_time_participation_only = True
+real_time_underbid_penalty = 10000
+real_time_participation_only = False
 
 
 @pytest.mark.unit
@@ -81,6 +82,7 @@ def test_model_object_missing_methods():
                 n_scenario=n_scenario,
                 solver=solver,
                 forecaster=forecaster,
+                real_time_underbid_penalty=real_time_underbid_penalty,
                 real_time_participation_only=real_time_participation_only,
             )
 
@@ -105,6 +107,7 @@ def test_model_object_missing_attr():
                 n_scenario=n_scenario,
                 solver=solver,
                 forecaster=forecaster,
+                real_time_underbid_penalty=real_time_underbid_penalty,
                 real_time_participation_only=real_time_participation_only,
             )
 
@@ -125,6 +128,7 @@ def test_n_scenario_checker():
             n_scenario=-1,
             solver=solver,
             forecaster=forecaster,
+            real_time_underbid_penalty=real_time_underbid_penalty,
             real_time_participation_only=real_time_participation_only,
         )
 
@@ -137,6 +141,7 @@ def test_n_scenario_checker():
             n_scenario=3.0,
             solver=solver,
             forecaster=forecaster,
+            real_time_underbid_penalty=real_time_underbid_penalty,
             real_time_participation_only=real_time_participation_only,
         )
 
@@ -158,6 +163,7 @@ def test_solver_checker():
                 n_scenario=n_scenario,
                 solver=s,
                 forecaster=forecaster,
+                real_time_underbid_penalty=real_time_underbid_penalty,
                 real_time_participation_only=real_time_participation_only,
             )
 
@@ -177,6 +183,7 @@ def bidder_object():
         n_scenario=n_scenario,
         solver=solver,
         forecaster=forecaster,
+        real_time_underbid_penalty=real_time_underbid_penalty,
         real_time_participation_only=real_time_participation_only,
     )
     return bidder_object
@@ -320,6 +327,7 @@ def bidder_object_pcost():
         n_scenario=n_scenario,
         solver=solver,
         forecaster=forecaster,
+        real_time_underbid_penalty=real_time_underbid_penalty,
         real_time_participation_only=real_time_participation_only,
     )
     return bidder_object

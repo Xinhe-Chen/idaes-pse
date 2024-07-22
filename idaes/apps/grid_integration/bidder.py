@@ -1047,6 +1047,8 @@ class Bidder(StochasticProgramBidder):
 
             real_time_underbid_penalty: penalty for RT power bid that's less than DA power bid, non-negative
 
+            real_time_participation_only: bool, Only consider Real-time market bidding.
+
         Returns:
             None
         """
