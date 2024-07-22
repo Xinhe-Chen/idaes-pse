@@ -3,7 +3,7 @@
 # Framework (IDAES IP) was produced under the DOE Institute for the
 # Design of Advanced Energy Systems (IDAES).
 #
-# Copyright (c) 2018-2023 by the software owners: The Regents of the
+# Copyright (c) 2018-2024 by the software owners: The Regents of the
 # University of California, through Lawrence Berkeley National Laboratory,
 # National Technology & Engineering Solutions of Sandia, LLC, Carnegie Mellon
 # University, West Virginia University Research Corporation, et al.
@@ -179,7 +179,7 @@ class _PhysicalParameterBlock(PhysicalParameterBlock):
         self.basis_switch = 1
         self.default_balance_switch = 1
 
-        self._state_block_class = TestStateBlock
+        self._state_block_class = StateBlockForTesting
 
         self.set_default_scaling("flow_vol", 100)
         self.set_default_scaling("flow_mol", 101)
@@ -234,7 +234,7 @@ class SBlockBase(StateBlock):
             k.hold_state = not k.hold_state
 
 
-@declare_process_block_class("TestStateBlock", block_class=SBlockBase)
+@declare_process_block_class("StateBlockForTesting", block_class=SBlockBase)
 class StateTestBlockData(StateBlockData):
     CONFIG = ConfigBlock(implicit=True)
 

@@ -3,7 +3,7 @@
 # Framework (IDAES IP) was produced under the DOE Institute for the
 # Design of Advanced Energy Systems (IDAES).
 #
-# Copyright (c) 2018-2023 by the software owners: The Regents of the
+# Copyright (c) 2018-2024 by the software owners: The Regents of the
 # University of California, through Lawrence Berkeley National Laboratory,
 # National Technology & Engineering Solutions of Sandia, LLC, Carnegie Mellon
 # University, West Virginia University Research Corporation, et al.
@@ -480,6 +480,7 @@ class LatinHypercubeSampling(SamplingMethods):
         sampling_type=None,
         xlabels=None,
         ylabels=None,
+        rand_seed=None,
     ):
         """
         Initialization of **LatinHypercubeSampling** class. Two inputs are required.
@@ -496,6 +497,7 @@ class LatinHypercubeSampling(SamplingMethods):
         Keyword Args:
             xlabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the independent/input  variables.  Only used in "selection" mode. Default is None.
             ylabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the dependent/output variables. Only used in "selection" mode. Default is None.
+            rand_seed (int): Option that allows users to fix the numpy random seed generator for reproducibility (if required).
 
         Returns:
             **self** function containing the input information
@@ -593,6 +595,13 @@ class LatinHypercubeSampling(SamplingMethods):
                 raise ValueError("number_of_samples must a positive, non-zero integer.")
             self.number_of_samples = number_of_samples
             self.x_data = bounds_array  # Only x data will be present in this case
+
+        if rand_seed is not None:
+            try:
+                self.seed_value = int(rand_seed)
+                np.random.seed(self.seed_value)
+            except ValueError:
+                raise ValueError("Random seed must be an integer.")
 
     def variable_sample_creation(self, variable_min, variable_max):
         """
@@ -1019,6 +1028,8 @@ class HaltonSampling(SamplingMethods):
             self.x_data = bounds_array  # Only x data will be present in this case
 
         if self.x_data.shape[1] > 10:
+            # PYLINT-TODO
+            # pylint: disable-next=broad-exception-raised
             raise Exception(
                 "Dimensionality problem: This method is not available for problems with dimensionality > 10: the performance of the method degrades substantially at higher dimensions"
             )
@@ -1057,12 +1068,12 @@ class HaltonSampling(SamplingMethods):
 
 
 class HammersleySampling(SamplingMethods):
-    """
+    r"""
     A class that performs Hammersley Sampling.
 
     Hammersley samples are generated in a similar way to Halton samples - based on the reversing/flipping the base conversion of numbers using primes.
 
-    To generate :math:`n` samples in a :math:`p`-dimensional space, the first :math:`\\left(p-1\\right)` prime numbers are used to generate the samples. The first dimension is obtained by uniformly dividing the region into **no_samples points**.
+    To generate :math:`n` samples in a :math:`p`-dimensional space, the first :math:`\left(p-1\right)` prime numbers are used to generate the samples. The first dimension is obtained by uniformly dividing the region into **no_samples points**.
 
     Note:
         Use of this method is limited to use in low-dimensionality problems (less than 10 variables). At higher dimensionalities, the performance of the sampling method has been shown to degrade.
@@ -1200,6 +1211,8 @@ class HammersleySampling(SamplingMethods):
             self.x_data = bounds_array  # Only x data will be present in this case
 
         if self.x_data.shape[1] > 10:
+            # PYLINT-TODO
+            # pylint: disable-next=broad-exception-raised
             raise Exception(
                 "Dimensionality problem: This method is not available for problems with dimensionality > 10: the performance of the method degrades substantially at higher dimensions"
             )
@@ -1269,6 +1282,7 @@ class CVTSampling(SamplingMethods):
         sampling_type=None,
         xlabels=None,
         ylabels=None,
+        rand_seed=None,
     ):
         """
         Initialization of CVTSampling class. Two inputs are required, while an optional option to control the solution accuracy may be specified.
@@ -1285,6 +1299,7 @@ class CVTSampling(SamplingMethods):
         Keyword Args:
             xlabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the independent/input  variables.  Only used in "selection" mode. Default is None.
             ylabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the dependent/output variables. Only used in "selection" mode. Default is None.
+            rand_seed (int): Option that allows users to fix the numpy random seed generator for reproducibility (if required).
             tolerance(float): Maximum allowable Euclidean distance between centres from consecutive iterations of the algorithm. Termination condition for algorithm.
 
                 - The smaller the value of tolerance, the better the solution but the longer the algorithm requires to converge. Default value is :math:`10^{-7}`.
@@ -1409,8 +1424,17 @@ class CVTSampling(SamplingMethods):
             # valid tolerance
             pass
         else:
+            # PYLINT-TODO
+            # pylint: disable-next=broad-exception-raised
             raise Exception("Invalid tolerance input")
         self.eps = tolerance
+
+        if rand_seed is not None:
+            try:
+                self.seed_value = int(rand_seed)
+                np.random.seed(self.seed_value)
+            except ValueError:
+                raise ValueError("Random seed must be an integer.")
 
     @staticmethod
     def random_sample_selection(no_samples, no_features):
@@ -1591,6 +1615,7 @@ class CustomSampling(SamplingMethods):
         xlabels=None,
         ylabels=None,
         strictly_enforce_gaussian_bounds=False,
+        rand_seed=None,
     ):
         """
         Initialization of CustomSampling class. Four inputs are required.
@@ -1608,6 +1633,7 @@ class CustomSampling(SamplingMethods):
         Keyword Args:
             xlabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the independent/input  variables.  Only used in "selection" mode. Default is None.
             ylabels (list): List of column names (if **data_input** is a dataframe) or column numbers (if **data_input** is an array) for the dependent/output variables. Only used in "selection" mode. Default is None.
+            rand_seed (int): Option that allows users to fix the numpy random seed generator for reproducibility (if required).
             strictly_enforce_gaussian_bounds (bool): Boolean specifying whether the provided bounds for normal distributions should be strictly enforced. Note that selecting this option may affect the underlying distribution. Default is False.
 
         Returns:
@@ -1732,13 +1758,21 @@ class CustomSampling(SamplingMethods):
             )
         self.normal_bounds_enforced = strictly_enforce_gaussian_bounds
 
+        if rand_seed is not None:
+            try:
+                self.seed_value = int(rand_seed)
+            except ValueError:
+                raise ValueError("Random seed must be an integer.")
+        else:
+            self.seed_value = rand_seed
+
     def generate_from_dist(self, dist_name):
         if dist_name.lower() in ["uniform", "random"]:
-            dist = getattr(np.random.default_rng(), dist_name.lower())
+            dist = getattr(np.random.default_rng(self.seed_value), dist_name.lower())
             var_values = np.array(dist(size=self.number_of_samples))
             return dist, var_values
         elif dist_name.lower() == "normal":
-            dist = getattr(np.random.default_rng(), "normal")
+            dist = getattr(np.random.default_rng(self.seed_value), "normal")
             var_values = dist(loc=0.5, scale=1 / 6, size=self.number_of_samples)
             if not self.normal_bounds_enforced:
                 return dist, np.array(var_values)
