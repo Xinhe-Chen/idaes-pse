@@ -792,3 +792,120 @@ class PerfectForecaster(AbstractPrescientPriceForecaster):
 
     def forecast_real_time_capacity_factor(self, date, hour, gen, horizon):
         return self.get_column_from_data(date, hour, horizon, f"{gen}-RTCF")
+
+
+class RHPTForecaster():
+    """
+    This is a forecaster to generate price signals for the rolling horizon optimization
+    """
+
+    def __init__(self, price_signal, scenario, horizon, planning_horizon, max_scenario=10):
+        """
+        Initialize the PricetakerBackcaster
+
+        Arguments:
+            price_signal: array-like data (list or np.array). The electricity price signal.
+
+            scenario: int, number of scenarios.
+
+            pointer: int, for the rolling horizon optimization, wew need to know where we are.
+
+            horizion: int, the length of the scenario in the price-taker model. (for example, for DA problem, this can be 36)
+
+            planning_horizon: int, the length of the planning horizon. (the stage 1 scheduling length, for DA, this can be 24)
+        """
+        self.price_signal = price_signal
+        self.scenario = scenario
+        self.horizon = horizon
+        self.planning_horizon = planning_horizon
+        self.max_scenario = max_scenario
+
+        self.pointer = 0
+        self._check_inputs()
+
+    def _check_inputs(self):
+        """
+        Check the inputs are valid values
+        """
+        # check the price_signal length is a multiple of 24
+        if not isinstance(self.price_signal, (list, np.ndarray)):
+            raise TypeError(f"The price signal should be list or np.ndarray.")
+        
+        if len(self.price_signal) % self.planning_horizon != 0:
+            raise ValueError(f"The length of price_signal should be a multiple of horizon.")
+        
+        # check the number of scenarios should be a integer and less than then max_scenario
+        if not (isinstance(self.scenario, int) and (self.scenario <= self.max_scenario)):
+            raise ValueError(f"The scenario should be an integer and should not exceed {self.max_scenario}.")
+        
+        # check the planning_horizon and horizon are integers
+        if not (isinstance(self.horizon, int) and isinstance(self.planning_horizon, int)):
+            raise ValueError(f"The horizon and planning_horizon should be an integer.")
+        
+        # check the horizon is greater or equal to than planning_horizon 
+        if not (self.horizon >= self.planning_horizon):
+            raise ValueError(f"The horizon should be greater or equal to the planning_horizon.")
+        
+        # check if the len(self.price_signal) / horizon <= scenario
+        num_days = len(self.price_signal) / self.horizon
+        if num_days <= self.scenario:
+            raise ValueError(f"The number of days should greater than the number of scenarios") 
+
+        self._reshape_signals()
+
+        _logger.info(f"Number of periods from provided data is {len(self.reshaped_signals)}.")
+        _logger.info(f"Number of scenarios is {self.scenario}.")
+        _logger.info(f"The length of the scenario is {self.horizon}.")
+
+
+    def _reshape_signals(self):
+        """
+        Reshape the price signal into the (days, horizon).
+        For example, if the total length is 8784 and horizon = 36, reshape into (366, 36).
+        Give an example in the reshaped signal. reshaped_signal[0] = price_signal[0:36], reshaped_signal[1] = price_signal[24:60]
+        DA scheduling always look ahead more than 24 hours. 
+        """
+        periods = int(len(self.price_signal) / self.planning_horizon)
+        reshaped_signals = []
+        for i in range(periods):
+            # make sure the index will not overflow.
+            if i*self.planning_horizon+self.horizon <= len(self.price_signal):
+                horizon_data = np.array(self.price_signal[i*self.planning_horizon: i*self.planning_horizon+self.horizon]).reshape(-1) # make sure the it is an 1D array.
+            else:
+                arr1 = np.array(self.price_signal[i*self.planning_horizon:]).reshape(-1) # if price signal is already an array, make sure the arr1 is 1D.
+                arr2 = np.array(self.price_signal[0:self.horizon - self.planning_horizon]).reshape(-1)
+                horizon_data = np.concatenate((arr1, arr2))
+            reshaped_signals.append(horizon_data)
+
+        self.reshaped_signals = np.array(reshaped_signals)
+
+
+    def _forecast_prices(self, pointer):
+        """
+        Get the historical price signals
+
+        Args:
+            pointer: the pointer to record the position in the dataframe
+
+        Returns:
+            Forecasted signals, in the shape of (scenario, horizon)
+        """
+        # if the pointer is less than the scenario, use the data in the end of the data
+        # pointer is from range(0, days). 
+        # For example, if pointer is 5, and scenario is 3, you should use signal of day 2, 3, and 4.
+        # if pointer is 3, and scenario is 5, you should use signal of day 0, 1, 2, -1, and -2.
+        if pointer < self.scenario:
+            arr1 = self.reshaped_signals[:pointer]
+            idx = self.scenario - pointer
+            forecasted_signals = np.vstack((arr1, self.reshaped_signals[-idx:]))
+        else:
+            forecasted_signals = self.reshaped_signals[pointer-self.scenario:pointer]
+        
+        return forecasted_signals
+    
+    def lmp_check(self):
+        """
+        Return the LMP data after reshape 
+        """
+
+        return self.reshaped_signals
