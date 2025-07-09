@@ -22,6 +22,7 @@ from pyomo.environ import (
     NonNegativeReals,
     Expression,
     maximize,
+    SolverFactory
 )
 
 from pyomo.common.config import (
@@ -135,5 +136,69 @@ class RHPTModel(ConcreteModel):
         return
     
 
-    def build_multiperiod_problem(self):
+    def build_multiperiod_problem(self, initial_state):
+        """
+        Build a stochastic optimization problem, each scenario is with the length of self._horizon
+        """
         return
+
+
+    def report_final_state(self):
+        """
+        Report the final state of the model. The  
+        """
+        return
+    
+
+    def record_solution(self, soln):
+        """
+        record the results from solved model.
+        """
+        return
+    
+
+class RHPTRunner:
+    def __init__(self, periods, forecaster, model):
+        self.periods = periods
+        self.forecaster = forecaster
+        self.model = model
+
+    def _check_inputs(self):
+        isinstance(self.period, int)
+        return
+
+    def run_rolling_horizon(self, init_state, solver="gurobi", solver_options={}):
+        """
+        Run the rolling horizon optimization. 
+
+        Args:
+            init_state: dictionary, the initial state at the beginning of rolling horizon optimization.
+            solver: dictionary, the solver for solving the optimization or simulation problem.
+            solver_options: dictionary, the solver options.
+
+        Returns:
+            results_dict: dictionary, keys are periods, values are results.
+        """
+        results_dict = {}
+        for i in range(self.periods):
+            _logger.info(f"Building rolling horizon optimization for period {i}.")
+            model = self.model.build_multiperiod_problem(initial_state=init_state)
+            opt_solver = SolverFactory(solver)
+            soln = opt_solver.solve(model, tee=True, options=solver_options)
+            results_dict[i] = self.model.read_solution(soln)
+            init_state = self.model.report_final_states()
+
+        return results_dict
+    
+    def visual_results(self, results_dict):
+        """
+        Visualize the results of the rolling horizon optimization
+
+        Args:
+            results_dict: results dictionary from run_rolling_horizon function.
+
+        Returns:
+            None
+        """
+        return
+
