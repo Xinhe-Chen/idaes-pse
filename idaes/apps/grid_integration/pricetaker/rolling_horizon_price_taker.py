@@ -35,7 +35,7 @@ from pyomo.common.config import (
 )
 import numpy as np
 from idaes.core.util.config import ConfigurationError, is_in_range
-from idaes.apps.grid_integration.forecaster import RHPTForecaster
+from idaes.apps.grid_integration import RHPTForecaster, PriceTakerModel, DesignModel, OperationModel
 import idaes.logger as idaeslog
 
 _logger = idaeslog.getLogger(__name__)
@@ -118,6 +118,9 @@ class RHPTModel(ConcreteModel):
             self.look_ahead = False
         else:
             self.look_ahead = True
+
+        self.lmp_data_check()
+        # self.model_type_check()
     
 
     def lmp_data_check(self):
@@ -134,15 +137,44 @@ class RHPTModel(ConcreteModel):
         _logger.info(f"The length of the LMP horizon is {horizon_length}")
 
         return
-    
 
-    def build_multiperiod_problem(self, initial_state):
+
+    def _build_PT_model(self, LMP_data, ):
         """
         Build a stochastic optimization problem, each scenario is with the length of self._horizon
+        
+        Args: 
+
+        Returns:
+            m: pyomo model, return this model can allow the user to further add constraints.
+            
         """
+        # Build a standard PT class model for each scenario
+        m = PriceTakerModel()
+        
+        # Append the LMP data to the PT model
+        m.append_lmp_data(LMP_data)
+        
+        # Build the multiperiod model
+        m.build_multiperiod_model(flowsheet_func=self.gen_flowsheet_func, flowsheet_options=self.gen_flowsheet_options)
+        
+        return m
+
+
+    def build_stochasctic_PT_model(self, initial_state):
+        """
+        Build the stochastic price-taker model
+        """
+        m = ConcreteModel()
+        m.set_scenarios = RangeSet(self._scenario)
+        m.scenarios = Block(m.set_scenarios)
+        for s in m.scenarios:
+            scenario_model = self._build_PT_model(LMP_data)
+            m.scenarios[s].transfer_attributes_from(scenario_model.clone())
+        
         return
-
-
+    
+    
     def report_final_state(self):
         """
         Report the final state of the model. The  
@@ -158,10 +190,12 @@ class RHPTModel(ConcreteModel):
     
 
 class RHPTRunner:
-    def __init__(self, periods, forecaster, model):
+    def __init__(self, periods, forecaster, flowsheet_func, flowsheet_options, model):
         self.periods = periods
         self.forecaster = forecaster
         self.model = model
+        self.flowsheet_func = flowsheet_func
+        self.flowsheet_options = flowsheet_options
 
     def _check_inputs(self):
         isinstance(self.period, int)
@@ -182,7 +216,7 @@ class RHPTRunner:
         results_dict = {}
         for i in range(self.periods):
             _logger.info(f"Building rolling horizon optimization for period {i}.")
-            model = self.model.build_multiperiod_problem(initial_state=init_state)
+            model = self.model.build_multiperiod_problem(pointer=i, flowsheet_func=self.flowsheet_func, flowsheet_options=self.flowsheet_options)
             opt_solver = SolverFactory(solver)
             soln = opt_solver.solve(model, tee=True, options=solver_options)
             results_dict[i] = self.model.read_solution(soln)

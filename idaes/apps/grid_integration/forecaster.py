@@ -880,7 +880,7 @@ class RHPTForecaster():
         self.reshaped_signals = np.array(reshaped_signals)
 
 
-    def _forecast_prices(self, pointer):
+    def forecast_prices(self, pointer):
         """
         Get the historical price signals
 
