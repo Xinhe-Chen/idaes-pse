@@ -60,43 +60,6 @@ CONFIG.declare(
     ),
 )
 
-# List of arguments for NPV calculation
-CONFIG.declare(
-    "lifetime",
-    ConfigValue(
-        domain=PositiveInt,
-        doc="Total lifetime of the system [in years]",
-    ),
-)
-CONFIG.declare(
-    "discount_rate",
-    ConfigValue(
-        domain=is_in_range(0, 1),
-        doc="Discount rate for annualization [fraction]",
-    ),
-)
-CONFIG.declare(
-    "corporate_tax_rate",
-    ConfigValue(
-        domain=is_in_range(0, 1),
-        doc="Effective corporate tax rate [fraction]",
-    ),
-)
-CONFIG.declare(
-    "annualization_factor",
-    ConfigValue(
-        domain=is_in_range(0, 1),
-        doc="Capital cost annualization factor [fraction]",
-    ),
-)
-CONFIG.declare(
-    "cash_inflow_scale_factor",
-    ConfigValue(
-        domain=NonNegativeFloat,
-        doc="Scaling factor for net cash inflow calculations",
-    ),
-)
-
 class RHPTModel(ConcreteModel):
     """Builds a price-taker model for a given system"""
 
@@ -139,7 +102,7 @@ class RHPTModel(ConcreteModel):
         return
 
 
-    def _build_PT_model(self, LMP_data, ):
+    def _build_PT_model(self, initial_state, LMP_data, flowsheet_func, flowsheet_options):
         """
         Build a stochastic optimization problem, each scenario is with the length of self._horizon
         
@@ -156,12 +119,15 @@ class RHPTModel(ConcreteModel):
         m.append_lmp_data(LMP_data)
         
         # Build the multiperiod model
-        m.build_multiperiod_model(flowsheet_func=self.gen_flowsheet_func, flowsheet_options=self.gen_flowsheet_options)
+        m.build_multiperiod_model(flowsheet_func, flowsheet_options)
+        
+        # Here, the initial state is only the t[init], they should be the same across all scenarios
+        self._initialize_mp_model(m, initial_state)
         
         return m
 
 
-    def build_stochasctic_PT_model(self, initial_state):
+    def build_stochasctic_PT_model(self, initial_state, LMP_data, flowsheet_func, flowsheet_options):
         """
         Build the stochastic price-taker model
         """
@@ -169,11 +135,46 @@ class RHPTModel(ConcreteModel):
         m.set_scenarios = RangeSet(self._scenario)
         m.scenarios = Block(m.set_scenarios)
         for s in m.scenarios:
-            scenario_model = self._build_PT_model(LMP_data)
+            scenario_model = self._build_PT_model(initial_state, LMP_data, flowsheet_func, flowsheet_options)
             m.scenarios[s].transfer_attributes_from(scenario_model.clone())
+            # m.add_model_constraints()
+        
+        self._add_nonantipativity_constraints(m)
+        self._set_objective_func(m)
+
+        return m
+    
+
+    # def _add_constraints(self, op_block_name, commodity, capacity)
+
+
+    def _add_nonantipativity_constraints(self, m):
+        """
+        Add nonantipativity constraints.
+        """
+        return
+
+
+    def _set_objective_func(self, m):
+        """
+        Set the objective function of the rolling horizon price taker model. 
+        
+        Args:
+            m: pyomo model for the stochastic price-taker class.
+    
+        Returns:
+            None
+        """
         
         return
     
+
+    def _initialize_mp_model(self, model, initial_state):
+        """
+        Initialize the multiperiod model based on the results of the previous optimization.
+        """
+        
+        return
     
     def report_final_state(self):
         """
