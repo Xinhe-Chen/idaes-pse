@@ -799,7 +799,7 @@ class RHPTForecaster():
     This is a forecaster to generate price signals for the rolling horizon optimization
     """
 
-    def __init__(self, price_signal, scenario, horizon, planning_horizon, max_scenario=10):
+    def __init__(self, price_signal, scenario, horizon, planning_horizon, max_scenario=10, max_horizon=24*31):
         """
         Initialize the PricetakerBackcaster
 
@@ -808,32 +808,41 @@ class RHPTForecaster():
 
             scenario: int, number of scenarios.
 
-            pointer: int, for the rolling horizon optimization, wew need to know where we are.
-
             horizion: int, the length of the scenario in the price-taker model. (for example, for DA problem, this can be 36)
 
             planning_horizon: int, the length of the planning horizon. (the stage 1 scheduling length, for DA, this can be 24)
+
+            max_scenario: int, max number of scenarios
+
+            max_horizon: int, max length of the horizon
         """
         self.price_signal = price_signal
         self.scenario = scenario
         self.horizon = horizon
         self.planning_horizon = planning_horizon
         self.max_scenario = max_scenario
-
-        self.pointer = 0
+        self.max_horizon = max_horizon
+    
         self._check_inputs()
+
 
     def _check_inputs(self):
         """
         Check the inputs are valid values
         """
         # check the price_signal length is a multiple of 24
-        if not isinstance(self.price_signal, (list, np.ndarray)):
-            raise TypeError(f"The price signal should be list or np.ndarray.")
-        
+        if not isinstance(self.price_signal, (list, np.ndarray, pd.DataFrame)):
+            raise TypeError(f"The price signal should be list, np.ndarray or pd.DataFrame.")
+
+        # if it is a pandas dataframe, convert to numpy array.
+        if isinstance(self.price_signal, pd.DataFrame):
+            self.price_signal = self.price_signal.to_numpy()
+
         if len(self.price_signal) % self.planning_horizon != 0:
-            raise ValueError(f"The length of price_signal should be a multiple of horizon.")
-        
+            _logger.warning(f"The length of price_signal ({len(self.price_signal)}) is not a multiple of planning_horizon ({self.planning_horizon}).")
+            # reshape the price_signal to be a multiple of planning_horizon
+            self.price_signal = self.price_signal[:len(self.price_signal) - (len(self.price_signal) % self.planning_horizon)]
+
         # check the number of scenarios should be a integer and less than then max_scenario
         if not (isinstance(self.scenario, int) and (self.scenario <= self.max_scenario)):
             raise ValueError(f"The scenario should be an integer and should not exceed {self.max_scenario}.")
@@ -845,11 +854,12 @@ class RHPTForecaster():
         # check the horizon is greater or equal to than planning_horizon 
         if not (self.horizon >= self.planning_horizon):
             raise ValueError(f"The horizon should be greater or equal to the planning_horizon.")
-        
-        # check if the len(self.price_signal) / horizon <= scenario
-        num_days = len(self.price_signal) / self.horizon
-        if num_days <= self.scenario:
-            raise ValueError(f"The number of days should greater than the number of scenarios") 
+
+        # check if the len(self.price_signal) / self.planning_horizon <= scenario
+        # total number of periods w.r.t the signal length
+        self.periods = int(len(self.price_signal) / self.planning_horizon)
+        if self.periods < self.scenario:
+            raise ValueError(f"The number of days should greater or equal to the number of scenarios.")
 
         self._reshape_signals()
 
@@ -860,14 +870,34 @@ class RHPTForecaster():
 
     def _reshape_signals(self):
         """
-        Reshape the price signal into the (days, horizon).
-        For example, if the total length is 8784 and horizon = 36, reshape into (366, 36).
-        Give an example in the reshaped signal. reshaped_signal[0] = price_signal[0:36], reshaped_signal[1] = price_signal[24:60]
-        DA scheduling always look ahead more than 24 hours. 
+        Reshape the price signal. 
+        self.reshaped_signals with shape of (periods, horizon).
+        self.reshaped_original_signals with shape of (periods, planning_horizon).
+        
+        For example, if the total length is 8784, planning_horizon = 24 and horizon = 36, self.reshaped_signals is (366, 36).
+        Give an example in the reshaped signal. self.reshaped_signals[0] = price_signal[0:36], self.reshaped_signals[1] = price_signal[24:60]
+
+        self.reshaped_original_signals is (366, 24).
+        self.reshaped_original_signals[0] = price_signal[0:24], self.reshaped_original_signals[1] = price_signal[24:48]
+
+        DA scheduling always look ahead more than 24 hours, e.g., 36 hours.
+
+        Args:
+             None
+
+        Returns:
+            None
         """
-        periods = int(len(self.price_signal) / self.planning_horizon)
+        # periods, (e.g., total number of days)
+        
         reshaped_signals = []
-        for i in range(periods):
+        reshaped_original_signals = []
+
+        for i in range(self.periods):
+            # slice the original price signal into (periods, planning_horizon)
+            planning_horizon_data = np.array(self.price_signal).reshape(-1)
+            reshaped_original_signals.append(planning_horizon_data[i*self.planning_horizon: i*self.planning_horizon+self.planning_horizon])
+            
             # make sure the index will not overflow.
             if i*self.planning_horizon+self.horizon <= len(self.price_signal):
                 horizon_data = np.array(self.price_signal[i*self.planning_horizon: i*self.planning_horizon+self.horizon]).reshape(-1) # make sure the it is an 1D array.
@@ -878,6 +908,7 @@ class RHPTForecaster():
             reshaped_signals.append(horizon_data)
 
         self.reshaped_signals = np.array(reshaped_signals)
+        self.reshaped_original_signals = np.array(reshaped_original_signals)
 
 
     def forecast_prices(self, pointer):
@@ -885,7 +916,7 @@ class RHPTForecaster():
         Get the historical price signals
 
         Args:
-            pointer: the pointer to record the position in the dataframe
+            pointer: the pointer to record the position in the array
 
         Returns:
             Forecasted signals, in the shape of (scenario, horizon)
@@ -903,9 +934,17 @@ class RHPTForecaster():
         
         return forecasted_signals
     
-    def lmp_check(self):
+
+    def fetch_original_signal(self, pointer):
         """
-        Return the LMP data after reshape 
+        Give the original signal for the specified pointer.
+        
+        Args:
+            pointer: the pointer to record the position in the array
+
+        Returns:
+            Original signals, in the shape of (planning_horizon,)
         """
 
-        return self.reshaped_signals
+        return self.reshaped_original_signals[pointer]
+    

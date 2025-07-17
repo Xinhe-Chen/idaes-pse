@@ -20,3 +20,5 @@ from .pricetaker.design_and_operation_models import (
     DesignModel,
     OperationModel,
 )
+from .forecaster import RHPTForecaster
+from .pricetaker.rolling_horizon_price_taker import StochasticPriceTaker
