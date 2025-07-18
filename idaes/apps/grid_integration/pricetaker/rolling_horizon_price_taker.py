@@ -329,7 +329,7 @@ class StochasticPriceTaker(ConcreteModel):
         # add capacity limits
         if capacity:
             m.add_capacity_limits(
-                op_block_name="gen_" + gen_dict["name"],
+                op_block_name=gen_dict["name"],
                 commodity="power",
                 capacity=m.gen_design.gen_capacity,
                 op_range_lb=gen_dict["min_p"]/gen_dict["max_p"],
@@ -338,7 +338,7 @@ class StochasticPriceTaker(ConcreteModel):
         if startup_shutdown:
             # add start up and shutdown constraints
             m.add_startup_shutdown(
-                op_block_name="gen_" + gen_dict["name"],
+                op_block_name=gen_dict["name"],
                 up_time=gen_dict["min_up_time"],
                 down_time=gen_dict["min_down_time"],
             )
@@ -346,7 +346,7 @@ class StochasticPriceTaker(ConcreteModel):
         if ramping:
             # add ramping constraints
             m.add_ramping_limits(
-                op_block_name="gen_" + gen_dict["name"],
+                op_block_name=gen_dict["name"],
                 commodity="power",
                 capacity=m.gen_design.gen_capacity,
                 startup_rate=gen_dict["min_p"]/gen_dict["max_p"],
@@ -409,8 +409,9 @@ class StochasticPriceTaker(ConcreteModel):
                 flowsheet_func=flowsheet_func,
                 flowsheet_options=flowsheet_options,
             )
-            # initialize the scenario model
-            self._initialize_scenario_model(scenario_model, initial_state)
+            # initialize the scenario model, if it is empty, we just skip it. 
+            if initial_state:
+                self._initialize_scenario_model(scenario_model, initial_state)
             
             # populate the scenario model with the design and operation models
             self.populate_multiperiod_model(scenario_model, gen_dict)
@@ -495,6 +496,8 @@ class StochasticPriceTaker(ConcreteModel):
             1. the unit commitment status, if the generator is on or off.
             2. the minimum up time and down time.
             3. if there is a storage, the storage state of charge.
+        This function is called before transferring the attributes from the scenario model to the scenario[s].
+        So the functions from the PriceTaker class can be used to set the initial state.
 
         Args:
             scenario_model: the scenario model to be initialized.
@@ -503,6 +506,41 @@ class StochasticPriceTaker(ConcreteModel):
         Returns:
             None.
         """
+
+        up_time = initial_state["up_time"]
+        down_time = initial_state["down_time"]
+
+        if up_time == 0 and down_time == 0:
+            # if the up time and down time are both 0, the initial state is wrong.
+            raise ValueError("The initial state is not valid, both up time and down time are 0.")
+        
+        if down_time * up_time != 0:
+            # if both up time and down time are not 0, the initial state is wrong.
+            raise ValueError("The initial state is not valid, both up time and down time are not 0.")
+        # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
+        op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
+
+        if down_time > 0:
+            # if the down time is greater than 0, the generator is off.
+            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
+            # The min_down_time should not exceed the horizon length.
+            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
+            scenario_model.initial_state_constraints = Constraint(
+                scenario_model.set_days,
+                scenario_model.set_time,
+                rule=lambda _, d, t: op_blks[d][t].op_mode == 0 if t <= time_need_to_stay_off else Constraint.Skip
+            )
+
+        if up_time > 0:
+            # if the up time is greater than 0, the generator is on.
+            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
+            # The min_up_time should not exceed the horizon length.
+            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
+            scenario_model.initial_state_constraints = Constraint(
+                scenario_model.set_days,
+                scenario_model.set_time,
+                rule=lambda _, d, t: op_blks[d][t].op_mode == 1 if t <= time_need_to_stay_on else Constraint.Skip
+            )
         
         return
     
@@ -594,13 +632,16 @@ class StochasticPriceTaker(ConcreteModel):
         """
         final_state = {}
         # Because of the nonantipativity constraints, we only need to report the state of scenario 1.
-        up_time, down_time = self._get_up_down_time("gen_" + self.scenarios[1].gen_dict["name"])
+        up_time, down_time = self._get_up_down_time(gen_dict["name"])
 
+        final_state["name"] = gen_dict["name"]
         final_state["up_time"] = up_time
         final_state["down_time"] = down_time
+        final_state["min_down_time"] = gen_dict["min_down_time"]
+        final_state["min_up_time"] = gen_dict["min_up_time"]
 
         return final_state
-        
+    
 
     def _calculate_actual_revenue(self, actual_price, var_name="power"):
         """
