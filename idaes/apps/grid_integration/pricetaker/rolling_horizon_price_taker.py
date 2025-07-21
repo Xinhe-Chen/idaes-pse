@@ -693,13 +693,14 @@ class StochasticPriceTaker(ConcreteModel):
             actual_shutdown_cost = sum(value(op_blks[1][t].shutdown) * self.gen_dict["fuel_p"] * 0 for t in self.set_planning_horizon)
 
             # calculate the actual revenue
-            actual_revenue = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
+            actual_profit = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
         
         else:
             # if an external function is provided, we use it to calculate the revenue.
-            actual_revenue = external_func(actual_price, *args, **kwargs)
-        
-        return actual_revenue
+            actual_profit = external_func(actual_price, *args, **kwargs)
+
+        return actual_profit
+
 
     def record_solution(self, soln, actual_price, power_var_name, operation_var_name):
         """
@@ -711,13 +712,15 @@ class StochasticPriceTaker(ConcreteModel):
 
         # record the objective value
         results["ObjectiveValue"] = value(self.obj)
-        results["ActualRevenue"] = self.calculate_actual_revenue(actual_price)
+        results["ActualProfit"] = self.calculate_actual_revenue(actual_price)
         for var_name in operation_var_name:
             pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
             results[f"OperationVariables_{var_name}"] = {
                 d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
                 for d in self.scenarios[1].set_days
             }
+        results["IdeaProfit1"] = sum(self.scenarios[1].cashflows.npv)
+        results["IdeaProfit1"] = sum(self.scenarios[2].cashflows.npv)
         
         return results
 
