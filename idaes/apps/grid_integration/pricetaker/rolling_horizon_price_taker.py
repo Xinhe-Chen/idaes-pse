@@ -682,17 +682,15 @@ class StochasticPriceTaker(ConcreteModel):
         # get the power output from the model
         if not external_func:
             # if no external function is provided, we use the default calculation.
-            power_output = self._get_operation_vars(1, "power_to_grid")
+            op_blks = self._get_operation_blocks(1, self.gen_dict['name'], ["power", "startup", "shutdown"])
             
             # calculate the actual revenue, the actual price is indexed from 0.
-            actual_elec_revenue = sum(actual_price[t-1] * value(power_output[1][t]) for t in self.set_planning_horizon)
-            actual_vom = sum(self.gen_dict["cost_curve"]["slope"] * value(power_output[1][t]) + self.gen_dict["cost_curve"]["intercept"] for t in self.set_planning_horizon)
+            actual_elec_revenue = sum(actual_price[t-1] * value(op_blks[1][t].power) for t in self.set_planning_horizon)
+            actual_vom = sum(self.gen_dict["cost_curve"]["slope"] * value(op_blks[1][t].power) + self.gen_dict["cost_curve"]["intercept"] for t in self.set_planning_horizon)
             
             # calculate the startup and shutdown costs
-            startups = self._get_operation_vars(1, "startup")
-            actual_startup_cost = sum(value(startups[1][t]) * self.gen_dict["fuel_p"] * self.gen_dict["start_heat_cold"] for t in self.set_planning_horizon)
-            shutdowns = self._get_operation_vars(1, "shutdown")
-            actual_shutdown_cost = sum(value(shutdowns[1][t]) * self.gen_dict["fuel_p"] * 0 for t in self.set_planning_horizon)
+            actual_startup_cost = sum(value(op_blks[1][t].startup) * self.gen_dict["fuel_p"] * self.gen_dict["start_heat_cold"] for t in self.set_planning_horizon)
+            actual_shutdown_cost = sum(value(op_blks[1][t].shutdown) * self.gen_dict["fuel_p"] * 0 for t in self.set_planning_horizon)
 
             # calculate the actual revenue
             actual_revenue = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
