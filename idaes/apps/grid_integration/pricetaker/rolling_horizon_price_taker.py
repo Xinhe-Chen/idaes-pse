@@ -699,7 +699,7 @@ class StochasticPriceTaker(ConcreteModel):
             # if an external function is provided, we use it to calculate the revenue.
             actual_profit = external_func(actual_price, *args, **kwargs)
 
-        return actual_profit
+        return float(actual_profit)
 
 
     def record_solution(self, soln, actual_price, external_func_record=None, *args, **kwargs):
@@ -707,8 +707,8 @@ class StochasticPriceTaker(ConcreteModel):
         record the results from solved model.
         """
         results = {}
-        results["TerminationCondition"] = soln.solver.termination_condition
-        results["SolverStatus"] = soln.solver.status
+        results["TerminationCondition"] = str(soln.solver.termination_condition)
+        results["SolverStatus"] = str(soln.solver.status)
 
         if not external_func_record:
             # if no external function is provided, we use the default calculation.
