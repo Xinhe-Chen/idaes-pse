@@ -64,7 +64,7 @@ CONFIG.declare(
 class StochasticPriceTaker(ConcreteModel):
     """Builds a price-taker model for a given system"""
 
-    def __init__(self, scenario, horizon, planning_horizon, max_scenario=10, max_horizon=24*31,*args, **kwds):
+    def __init__(self, scenario, horizon, planning_horizon, gen_dict, max_scenario=10, max_horizon=24*31,*args, **kwds):
         """
         Args:
 
@@ -73,6 +73,7 @@ class StochasticPriceTaker(ConcreteModel):
         self.scenario = scenario
         self.horizon = horizon
         self.planning_horizon = planning_horizon
+        self.gen_dict = gen_dict
         # Users can change the max_scenario and max_horizon to fit their needs.
         self.max_scenario = max_scenario
         self.max_horizon = max_horizon
@@ -167,6 +168,30 @@ class StochasticPriceTaker(ConcreteModel):
             None
         """
         self._planning_horizon = value
+
+    @property
+    def gen_dict(self):
+        """
+        Property getter for gen_dict.
+
+        Returns:
+            dict: saved gen_dict value
+        """
+        return self._gen_dict
+
+
+    @gen_dict.setter
+    def gen_dict(self, value):
+        """
+        Property setter for gen_dict
+
+        Args:
+            value: intended value for gen_dict
+
+        Returns:
+            None
+        """
+        self._gen_dict = value
 
 
     def param_check(self):
@@ -315,12 +340,11 @@ class StochasticPriceTaker(ConcreteModel):
         return m
 
 
-    def populate_multiperiod_model(self, m, gen_dict, capacity=True, startup_shutdown=True, ramping=True):
+    def populate_multiperiod_model(self, m, capacity=True, startup_shutdown=True, ramping=True):
         """
         Populate the multiperiod model for the price-taker model. Add the ramping constraints, startup/shutdown constraints.
 
         Args:
-            gen_dict: dictionary containing generator parameters.
             m: scenario pyomo model instance.
 
         Returns:
@@ -329,30 +353,30 @@ class StochasticPriceTaker(ConcreteModel):
         # add capacity limits
         if capacity:
             m.add_capacity_limits(
-                op_block_name=gen_dict["name"],
+                op_block_name=self.gen_dict["name"],
                 commodity="power",
                 capacity=m.gen_design.gen_capacity,
-                op_range_lb=gen_dict["min_p"]/gen_dict["max_p"],
+                op_range_lb=self.gen_dict["min_p"]/self.gen_dict["max_p"],
             )
 
         if startup_shutdown:
             # add start up and shutdown constraints
             m.add_startup_shutdown(
-                op_block_name=gen_dict["name"],
-                up_time=gen_dict["min_up_time"],
-                down_time=gen_dict["min_down_time"],
+                op_block_name=self.gen_dict["name"],
+                up_time=self.gen_dict["min_up_time"],
+                down_time=self.gen_dict["min_down_time"],
             )
         
         if ramping:
             # add ramping constraints
             m.add_ramping_limits(
-                op_block_name=gen_dict["name"],
+                op_block_name=self.gen_dict["name"],
                 commodity="power",
                 capacity=m.gen_design.gen_capacity,
-                startup_rate=gen_dict["min_p"]/gen_dict["max_p"],
-                shutdown_rate=gen_dict["min_p"]/gen_dict["max_p"],
-                rampdown_rate=min(gen_dict["ramp"], gen_dict["max_p"])/gen_dict["max_p"],
-                rampup_rate=min(gen_dict["ramp"], gen_dict["max_p"])/gen_dict["max_p"],
+                startup_rate=self.gen_dict["min_p"]/self.gen_dict["max_p"],
+                shutdown_rate=self.gen_dict["min_p"]/self.gen_dict["max_p"],
+                rampdown_rate=min(self.gen_dict["ramp"], self.gen_dict["max_p"])/self.gen_dict["max_p"],
+                rampup_rate=min(self.gen_dict["ramp"], self.gen_dict["max_p"])/self.gen_dict["max_p"],
             )
         return
 
@@ -365,7 +389,6 @@ class StochasticPriceTaker(ConcreteModel):
                                    initial_state, 
                                    LMP_data, 
                                    design_func, 
-                                   gen_dict, 
                                    flowsheet_func, 
                                    flowsheet_options, 
                                    nonanti_varnames,
@@ -405,7 +428,7 @@ class StochasticPriceTaker(ConcreteModel):
             scenario_model = self.build_PT_model(
                 LMP_data=LMP_data[s-1],
                 design_func=design_func,
-                gen_dict=gen_dict,
+                gen_dict=self.gen_dict,
                 flowsheet_func=flowsheet_func,
                 flowsheet_options=flowsheet_options,
             )
@@ -414,7 +437,7 @@ class StochasticPriceTaker(ConcreteModel):
                 self._initialize_scenario_model(scenario_model, initial_state)
             
             # populate the scenario model with the design and operation models
-            self.populate_multiperiod_model(scenario_model, gen_dict)
+            self.populate_multiperiod_model(scenario_model)
 
             # add the cashflow for each scenario
             scenario_model.add_hourly_cashflows(
@@ -620,7 +643,7 @@ class StochasticPriceTaker(ConcreteModel):
         return up_time, down_time
 
 
-    def report_final_state(self, gen_dict):
+    def report_final_state(self):
         """
         Report the final state of the model.
 
@@ -632,13 +655,13 @@ class StochasticPriceTaker(ConcreteModel):
         """
         final_state = {}
         # Because of the nonantipativity constraints, we only need to report the state of scenario 1.
-        up_time, down_time = self._get_up_down_time(gen_dict["name"])
+        up_time, down_time = self._get_up_down_time(self.gen_dict["name"])
 
-        final_state["name"] = gen_dict["name"]
+        final_state["name"] = self.gen_dict["name"]
         final_state["up_time"] = up_time
         final_state["down_time"] = down_time
-        final_state["min_down_time"] = gen_dict["min_down_time"]
-        final_state["min_up_time"] = gen_dict["min_up_time"]
+        final_state["min_down_time"] = self.gen_dict["min_down_time"]
+        final_state["min_up_time"] = self.gen_dict["min_up_time"]
 
         return final_state
     
@@ -675,9 +698,9 @@ class StochasticPriceTaker(ConcreteModel):
         results["ObjectiveValue"] = value(self.obj)
         results["ActualRevenue"] = self._calculate_actual_revenue(actual_price, var_name=power_var_name)
         for var_name in operation_var_name:
-            pyomo_var_names = self._get_operation_vars(1, var_name=var_name)
+            pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
             results[f"OperationVariables_{var_name}"] = {
-                d: {t: value(pyomo_var_names[d][t]) for t in self.set_planning_horizon}
+                d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
                 for d in self.scenarios[1].set_days
             }
         
