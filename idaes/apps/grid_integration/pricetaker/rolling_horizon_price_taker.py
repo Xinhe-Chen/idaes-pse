@@ -668,25 +668,40 @@ class StochasticPriceTaker(ConcreteModel):
         return final_state
     
 
-    def _calculate_actual_revenue(self, actual_price, var_name="power"):
+    def calculate_actual_revenue(self, actual_price, external_func=None, *args, **kwargs):
         """
         Calculate the actual revenue based on the actual price and the power output.
 
         Args:
             actual_price: list, the actual price for each time period.
-            var_name: str, the variable name for the power output, default is "power".
+            external_func: function, an external function to calculate the revenue, if not provided, the default calculation will be used.
 
         Returns:
             actual_revenue: float, the actual revenue.
         """
         # get the power output from the model
-        power_output = self._get_operation_vars(1, var_name)
-        
-        # calculate the actual revenue, the actual price is indexed from 0.
-        actual_revenue = sum(actual_price[t-1] * value(power_output[1][t]) for t in self.set_planning_horizon)
+        if not external_func:
+            # if no external function is provided, we use the default calculation.
+            power_output = self._get_operation_vars(1, "power")
+            
+            # calculate the actual revenue, the actual price is indexed from 0.
+            actual_elec_revenue = sum(actual_price[t-1] * value(power_output[1][t]) for t in self.set_planning_horizon)
+            actual_vom = sum(self.gen_dict["cost_curve"]["slope"] * value(power_output[1][t]) + self.gen_dict["cost_curve"]["intercept"] for t in self.set_planning_horizon)
+            
+            # calculate the startup and shutdown costs
+            startups = self._get_operation_vars(1, "startup")
+            actual_startup_cost = sum(value(startups[1][t]) * self.gen_dict["fuel_p"] * self.gen_dict["start_heat_cold"] for t in self.set_planning_horizon)
+            shutdowns = self._get_operation_vars(1, "shutdown")
+            actual_shutdown_cost = sum(value(shutdowns[1][t]) * self.gen_dict["fuel_p"] * 0 for t in self.set_planning_horizon)
 
+            # calculate the actual revenue
+            actual_revenue = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
+        
+        else:
+            # if an external function is provided, we use it to calculate the revenue.
+            actual_revenue = external_func(actual_price, *args, **kwargs)
+        
         return actual_revenue
-    
 
     def record_solution(self, soln, actual_price, power_var_name, operation_var_name):
         """
@@ -698,7 +713,7 @@ class StochasticPriceTaker(ConcreteModel):
 
         # record the objective value
         results["ObjectiveValue"] = value(self.obj)
-        results["ActualRevenue"] = self._calculate_actual_revenue(actual_price, var_name=power_var_name)
+        results["ActualRevenue"] = self.calculate_actual_revenue(actual_price)
         for var_name in operation_var_name:
             pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
             results[f"OperationVariables_{var_name}"] = {
