@@ -702,7 +702,7 @@ class StochasticPriceTaker(ConcreteModel):
         return actual_profit
 
 
-    def record_solution(self, soln, actual_price, power_var_name, operation_var_name):
+    def record_solution(self, soln, actual_price, external_func_record=None, *args, **kwargs):
         """
         record the results from solved model.
         """
@@ -710,20 +710,25 @@ class StochasticPriceTaker(ConcreteModel):
         results["TerminationCondition"] = soln.solver.termination_condition
         results["SolverStatus"] = soln.solver.status
 
-        # record the objective value
-        results["ObjectiveValue"] = value(self.obj)
-        results["ActualProfit"] = self.calculate_actual_revenue(actual_price)
-        for var_name in operation_var_name:
-            pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
-            results[f"OperationVariables_{var_name}"] = {
-                d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
-                for d in self.scenarios[1].set_days
-            }
-            results[f"NonantiCheck_{var_name}"] = {
-                d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
-                for d in self.scenarios[2].set_days
-            }
-        results["IdeaProfit"] = sum(self.scenario_weight[s] * value(self.scenarios[s].period[1, t].net_hourly_cash_inflow) for s in self.set_scenarios for t in self.set_planning_horizon)
+        if not external_func_record:
+            # if no external function is provided, we use the default calculation.
+            operation_var_name = ["power", "startup", "shutdown", "op_mode"]
+
+            # record the objective value
+            results["ObjectiveValue"] = value(self.obj)
+            results["ActualProfit"] = self.calculate_actual_revenue(actual_price)
+            for var_name in operation_var_name:
+                pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
+                results[f"OperationVariables_{var_name}"] = {
+                    d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
+                    for d in self.scenarios[1].set_days
+                }
+
+            results["IdeaProfit"] = sum(self.scenario_weight[s] * value(self.scenarios[s].period[1, t].net_hourly_cash_inflow) for s in self.set_scenarios for t in self.set_planning_horizon)
+
+        else:
+            # if an external function is provided, we use it to record the results.
+            results = external_func_record(self, soln, actual_price, *args, **kwargs)
 
         return results
 
