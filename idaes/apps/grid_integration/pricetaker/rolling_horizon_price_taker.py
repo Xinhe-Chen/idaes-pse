@@ -682,7 +682,7 @@ class StochasticPriceTaker(ConcreteModel):
         # get the power output from the model
         if not external_func:
             # if no external function is provided, we use the default calculation.
-            power_output = self._get_operation_vars(1, "power")
+            power_output = self._get_operation_vars(1, "power_to_grid")
             
             # calculate the actual revenue, the actual price is indexed from 0.
             actual_elec_revenue = sum(actual_price[t-1] * value(power_output[1][t]) for t in self.set_planning_horizon)
