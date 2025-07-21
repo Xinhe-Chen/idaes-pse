@@ -681,7 +681,7 @@ class StochasticPriceTaker(ConcreteModel):
         power_output = self._get_operation_vars(1, var_name)
         
         # calculate the actual revenue, the actual price is indexed from 0.
-        actual_revenue = sum(actual_price[t-1] * power_output[1][t] for t in self.set_planning_horizon)
+        actual_revenue = sum(actual_price[t-1] * value(power_output[1][t]) for t in self.set_planning_horizon)
 
         return actual_revenue
     
