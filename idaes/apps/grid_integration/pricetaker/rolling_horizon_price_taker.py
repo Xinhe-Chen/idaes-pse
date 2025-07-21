@@ -719,8 +719,7 @@ class StochasticPriceTaker(ConcreteModel):
                 d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
                 for d in self.scenarios[1].set_days
             }
-        results["IdeaProfit1"] = value(self.scenarios[1].cashflows.npv)
-        results["IdeaProfit2"] = value(self.scenarios[2].cashflows.npv)
+        results["IdeaProfit"] = sum(self.scenario_weight[s] * value(self.scenarios[s].period[1][t].net_hourly_cash_inflow) for t in self.set_planning_horizon for s in self.set_scenarios)
 
         return results
 
