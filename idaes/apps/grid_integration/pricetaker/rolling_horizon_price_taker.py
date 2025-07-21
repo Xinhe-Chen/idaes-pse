@@ -545,9 +545,10 @@ class StochasticPriceTaker(ConcreteModel):
 
         if down_time > 0:
             # if the down time is greater than 0, the generator is off.
-            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
+            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 1).
+            # If the generator is on, at least it should be on for one hour.
             # The min_down_time should not exceed the horizon length.
-            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
+            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 1), self.horizon)
             scenario_model.initial_state_constraints = Constraint(
                 scenario_model.set_days,
                 scenario_model.set_time,
@@ -556,9 +557,10 @@ class StochasticPriceTaker(ConcreteModel):
 
         if up_time > 0:
             # if the up time is greater than 0, the generator is on.
-            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
+            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 1).
+            # If the generator is off, at least it should be off for one hour.
             # The min_up_time should not exceed the horizon length.
-            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
+            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 1), self.horizon)
             scenario_model.initial_state_constraints = Constraint(
                 scenario_model.set_days,
                 scenario_model.set_time,
