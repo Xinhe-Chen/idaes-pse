@@ -11,6 +11,7 @@
 # for full copyright and license information.
 #################################################################################
 
+from typing import Optional, Union, Callable, List
 from pyomo.environ import (
     ConcreteModel,
     Block,
@@ -31,10 +32,10 @@ from pyomo.common.config import (
     ConfigValue,
     NonNegativeInt,
     NonNegativeFloat,
-    ListOf,
     PositiveInt,
 )
 import numpy as np
+import pandas as pd
 from idaes.core.util.config import ConfigurationError
 from idaes.apps.grid_integration import PriceTakerModel, DesignModel, OperationModel
 import idaes.logger as idaeslog
@@ -69,16 +70,24 @@ CONFIG.declare(
 )
 
 
-
 class StochasticPriceTaker(ConcreteModel):
     """
     Builds a scenario-based stochastic price-taker model for a given system.
     """
 
-    def __init__(self, scenario, horizon, planning_horizon, gen_dict, max_scenario=10, max_horizon=24*31, *args, **kwds):
+    def __init__(self, scenario: int, 
+                 horizon: int, 
+                 planning_horizon: int, 
+                 gen_dict: dict, 
+                 max_scenario: Optional[int] = 10, 
+                 max_horizon: Optional[int]=24*31, 
+                 *args, **kwds):
         """
         Args:
-
+            scenario: int, number of scenarios in the stochastic price-taker.
+            horizon: int, the number of periods in each scenario.
+            planning_horizon: int, the number of periods that need non-anticipativity constraints.
+            gen_dict: dict, dictionary contains the information of the generator.
         """
         super().__init__(*args, **kwds)
         self.scenario = scenario
@@ -233,12 +242,12 @@ class StochasticPriceTaker(ConcreteModel):
         return
 
     
-    def lmp_check(self, lmp_data):
+    def lmp_check(self, lmp_data: Union[List, np.ndarray, pd.DataFrame]):
         """
         Check the LMP from the forecaster.
 
         Args:
-            lmp_data, array like lmp signals with shape (self.scenario, self.horizon)
+            lmp_data: array like lmp signals with shape (self.scenario, self.horizon)
 
         Returns:
             None
@@ -256,8 +265,16 @@ class StochasticPriceTaker(ConcreteModel):
         return
 
 
-    def _assert_mp_model_exists(self, s):
-        """Raise an error if the multiperiod model does not exist"""
+    def _assert_mp_model_exists(self, s: int):
+        """
+        Raise an error if the multiperiod model does not exist
+        
+        Args:
+            s: int, the index of the scenario.
+
+        Returns:
+            None
+        """
         if not hasattr(self.scenarios[s], "period"):
             raise ConfigurationError(
                 "Unable to find the multiperiod model. Please use the "
@@ -265,10 +282,17 @@ class StochasticPriceTaker(ConcreteModel):
             )
     
     
-    def _get_operation_vars(self, s, var_name):
+    def _get_operation_vars(self, s: int, var_name: str):
         """
         Returns a dictionary of pointers to the var_name variable located in each flowsheet
         instance. If the variable is not present, then an error is raised.
+
+        Args:
+            s: int, the index of the scenario.
+            var_name: str, the variable name you want to get
+
+        Returns:
+            None
         """
         # Ensure that the multiperiod model exists
         self._assert_mp_model_exists(s)
@@ -288,11 +312,18 @@ class StochasticPriceTaker(ConcreteModel):
         return op_vars
 
 
-    def _get_operation_blocks(self, s, blk_name: str, attribute_list: list):
+    def _get_operation_blocks(self, s: int, blk_name: str, attribute_list: List):
         """
         Returns a dictionary of operational blocks named 'blk_name'.
         In addition, it also checks the existence of the operational
         blocks, and the existence of specified attributes.
+        
+        Args:
+            s: int, the index of the scenario.
+            var_name: str, the variable name you want to get
+
+        Returns:
+            None
         """
         # Ensure that the multiperiod model exists
         self._assert_mp_model_exists(s)
@@ -323,11 +354,17 @@ class StochasticPriceTaker(ConcreteModel):
 
 
     @staticmethod
-    def build_PT_model(LMP_data, design_func, gen_dict, flowsheet_func, flowsheet_options):
+    def build_PT_model(LMP_data: Union[List, np.ndarray, pd.DataFrame], 
+                       design_func_dict: dict,
+                       design_params: dict, 
+                       flowsheet_func: Callable, 
+                       flowsheet_options: dict):
         """
-        Build a stochastic optimization problem, each scenario is with the length of self.horizon
+        Build a stochastic optimization problem, each scenario is with the length of self.horizon.
         
         Args: 
+            LMP_data: array like, the LMP data used for building the price-taker problem.
+            design_func: list, list of functions. Making this into list enables define different design funcs.
 
         Returns:
             m: pyomo model, return this model can allow the user to further add constraints.
@@ -339,11 +376,13 @@ class StochasticPriceTaker(ConcreteModel):
         # Append the LMP data to the PT model
         m.append_lmp_data(LMP_data)
         
-        # Build design models and fix the capacity
-        m.gen_design = DesignModel(
-            model_func=design_func,
-            model_args={"gen_dict": gen_dict},
-        )
+        for key in list(design_params.keys()):
+            setattr(m, 
+                    f"gen_design_{design_params[key]['name']}", 
+                    DesignModel(model_func=design_func_dict[key],
+                                model_args={"params": design_params[key]},
+                )
+            )
 
         # Build the multiperiod model
         m.build_multiperiod_model(flowsheet_func, flowsheet_options)
@@ -351,61 +390,170 @@ class StochasticPriceTaker(ConcreteModel):
         return m
 
 
-    def populate_multiperiod_model(self, m, capacity=True, startup_shutdown=True, ramping=True):
+    def _populate_multiperiod_model_capacity(self, m, commodity, capacity_names=None):
         """
-        Populate the multiperiod model for the price-taker model. Add the ramping constraints, startup/shutdown constraints.
+        Populate the multiperiod model for the price-taker model. Add the capacity limit constraints.
 
         Args:
             m: scenario pyomo model instance.
+            commodity: str, name of the commodity on the model the capacity constraints.
 
         Returns:
             None
-        """
+        """        
         # add capacity limits
-        if capacity:
-            m.add_capacity_limits(
-                op_block_name=self.gen_dict["name"],
-                commodity="power",
-                capacity=m.gen_design.gen_capacity,
-                op_range_lb=self.gen_dict["min_p"]/self.gen_dict["max_p"],
-            )
+        if capacity_names:
+            for name in capacity_names:
+                m.add_capacity_limits(
+                    op_block_name=name,
+                    commodity=commodity,
+                    capacity=getattr(getattr(m, f"gen_design_{name}"), "capacity"),
+                    op_range_lb=self.gen_dict[name]["min_p"]/self.gen_dict[name]["max_p"],
+                )
 
-        if startup_shutdown:
-            # add start up and shutdown constraints
-            m.add_startup_shutdown(
-                op_block_name=self.gen_dict["name"],
-                up_time=self.gen_dict["min_up_time"],
-                down_time=self.gen_dict["min_down_time"],
-            )
-        
-        if ramping:
-            # add ramping constraints
-            m.add_ramping_limits(
-                op_block_name=self.gen_dict["name"],
-                commodity="power",
-                capacity=m.gen_design.gen_capacity,
-                startup_rate=self.gen_dict["min_p"]/self.gen_dict["max_p"],
-                shutdown_rate=self.gen_dict["min_p"]/self.gen_dict["max_p"],
-                rampdown_rate=min(self.gen_dict["ramp"], self.gen_dict["max_p"])/self.gen_dict["max_p"],
-                rampup_rate=min(self.gen_dict["ramp"], self.gen_dict["max_p"])/self.gen_dict["max_p"],
-            )
+        return
+
+    def _populate_multiperiod_model_startup_shutdown(self, m, startup_names=None):
+        """
+        Populate the multiperiod model for the price-taker model. Add the startup/shutdown constraints.
+
+        Args:
+            m: scenario pyomo model instance.
+            commodity: str, name of the commodity on the model the capacity constraints.
+
+        Returns:
+            None
+        """        
+        # add start up and shutdown constraints
+        if startup_names:
+            for name in startup_names:
+                m.add_startup_shutdown(
+                    op_block_name=name,
+                    up_time=self.gen_dict[name]["min_up_time"],
+                    down_time=self.gen_dict[name]["min_down_time"],
+                )
+
+        return
+    
+
+    def _populate_multiperiod_model_ramping(self, m, commodity, ramping_names=None):
+        """
+        Populate the multiperiod model for the price-taker model. Add the startup/shutdown constraints.
+
+        Args:
+            m: scenario pyomo model instance.
+            commodity: str, name of the commodity on the model the capacity constraints.
+
+        Returns:
+            None
+        """        
+        # add ramping constraints
+        if ramping_names:
+            for name in ramping_names:
+                m.add_ramping_limits(
+                    op_block_name=name,
+                    commodity=commodity,
+                    capacity=getattr(getattr(m, f"gen_design_{name}"), "capacity"),
+                    startup_rate=self.gen_dict[name]["min_p"]/self.gen_dict[name]["max_p"],
+                    shutdown_rate=self.gen_dict[name]["min_p"]/self.gen_dict[name]["max_p"],
+                    rampdown_rate=min(self.gen_dict[name]["ramp"], 1),
+                    rampup_rate=min(self.gen_dict[name]["ramp"], 1),
+                )
+
         return
 
 
-    def weight_rule(self):
+    def default_weight_rule(self):
         return 1/len(self.set_scenarios)
 
+    def generate_scenario_model_list(self,
+                                     initial_state,
+                                     LMP_data, 
+                                     design_func_dict,
+                                     design_params,
+                                     flowsheet_func,
+                                     flowsheet_options,
+                                     commodity,
+                                     revenue_streams=["elec_revenue"],
+                                     operational_costs=None, 
+                                     corporate_tax_rate=0,
+                                     weight_rule=default_weight_rule,
+                                     capacity_names=None,
+                                     startup_names=None,
+                                     ramping_names=None,
+                                     ):
+        """
+        Returns a list containing the scenario models.
+        This enables user to customize the scenario models before they become a part of the stochastic program.
+        
+        """
+        # set of the scenarios
+        self.set_scenarios = RangeSet(self.scenario)
 
-    def build_stochastic_PT_model(self, 
-                                   initial_state, 
-                                   LMP_data, 
-                                   design_func, 
-                                   flowsheet_func, 
-                                   flowsheet_options, 
-                                   nonanti_varnames,
-                                   operational_costs=None,
-                                   corporate_tax_rate=0,
-                                   weight_rule=weight_rule):
+        # build block for scenarios
+        self.scenarios = Block(self.set_scenarios)
+
+        # set of the plannig horizon, the horizon has nonantipativity constraints.
+        self.set_planning_horizon = RangeSet(self.planning_horizon)
+
+        # the weight rule can be defined as an external function.
+        self.scenario_weight = Param(self.set_scenarios, rule=weight_rule)
+
+        scenario_model_list = []
+
+        for s in self.set_scenarios:
+            # build the scenario model, we need to pass the LMP data for each scenario
+            _logger.info(f"Building scenario {s} model.")
+
+            scenario_model = self.build_PT_model(
+                LMP_data=LMP_data[s-1],
+                design_func_dict=design_func_dict,
+                design_params=design_params,
+                flowsheet_func=flowsheet_func,
+                flowsheet_options=flowsheet_options,
+            )
+
+            # initialize the scenario model, if it is empty, we just skip it. 
+            if initial_state:
+                for key in initial_state.keys():
+                    _logger.info(f"Initialize scenario model {s}.")
+                    self._initialize_scenario_model(scenario_model, initial_state[key])
+            
+            # populate the scenario model
+            # adding capacity limit constraints
+            if capacity_names == None:
+                capacity_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
+            self._populate_multiperiod_model_capacity(scenario_model, commodity, capacity_names=capacity_names)
+
+            # adding startup_shutdown constraints
+            if startup_names == None:
+                startup_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
+            self._populate_multiperiod_model_startup_shutdown(scenario_model, startup_names=startup_names)
+
+            # adding ramping constraints
+            if ramping_names == None:
+                ramping_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
+            self._populate_multiperiod_model_ramping(scenario_model, commodity, ramping_names=ramping_names)
+
+
+            # add the cashflow for each scenario
+            scenario_model.add_hourly_cashflows(
+                revenue_streams=revenue_streams,
+                operational_costs=operational_costs,
+            )
+            # add the overall cashflows, since rolling horizon is a optimization for days or weeks, we do not want to include capex.
+            scenario_model.add_overall_cashflows(corporate_tax_rate=corporate_tax_rate)
+
+            # make sure the capex is 0 for rolling horizon optimization
+            scenario_model.cashflows.capex.set_value(0)
+
+            scenario_model_list.append(scenario_model)
+
+        return scenario_model_list
+
+
+
+    def build_stochastic_PT_model(self, scenario_model_list, nonanti_varnames):
         """
         Build the stochastic price-taker model
 
@@ -420,47 +568,11 @@ class StochasticPriceTaker(ConcreteModel):
         Returns:
             None
         """
-        # set of the scenarios
-        self.set_scenarios = RangeSet(self.scenario)
-
-        # build block for scenarios
-        self.scenarios = Block(self.set_scenarios)
-
-        # set of the plannig horizon, the horizon has nonantipativity constraints.
-        self.set_planning_horizon = RangeSet(self.planning_horizon)
-
-        # the weight rule can be defined as an external function.
-        self.scenario_weight = Param(self.set_scenarios, rule=weight_rule)
+        if len(scenario_model_list) != len(self.set_scenarios):
+            raise ValueError("The scenario_list length does not match the scenarios provided")
         
-        for s in self.set_scenarios:
-            # build the scenario model, we need to pass the LMP data for each scenario
+        for s, scenario_model in zip(self.set_scenarios, scenario_model_list):
             _logger.info(f"Building scenario {s} model.")
-
-            scenario_model = self.build_PT_model(
-                LMP_data=LMP_data[s-1],
-                design_func=design_func,
-                gen_dict=self.gen_dict,
-                flowsheet_func=flowsheet_func,
-                flowsheet_options=flowsheet_options,
-            )
-            # initialize the scenario model, if it is empty, we just skip it. 
-            if initial_state:
-                self._initialize_scenario_model(scenario_model, initial_state)
-            
-            # populate the scenario model with the design and operation models
-            self.populate_multiperiod_model(scenario_model)
-
-            # add the cashflow for each scenario
-            scenario_model.add_hourly_cashflows(
-                revenue_streams=["elec_revenue"],
-                operational_costs=operational_costs,
-            )
-            # add the overall cashflows, since rolling horizon is a optimization for days or weeks, we do not want to include capex.
-            scenario_model.add_overall_cashflows(corporate_tax_rate=corporate_tax_rate)
-
-            # make sure the capex is 0 for rolling horizon optimization
-            scenario_model.cashflows.capex.set_value(0)
-
             # transfer attributes from the scenario model to the scenario[s]
             self.scenarios[s].transfer_attributes_from(scenario_model.clone())
 
@@ -569,7 +681,6 @@ class StochasticPriceTaker(ConcreteModel):
 
             else:
                 return op_blks[d][t].op_mode == 0
-
 
         if down_time > 0:
             # if the down time is greater than 0, the generator is off.
@@ -683,14 +794,15 @@ class StochasticPriceTaker(ConcreteModel):
             final_state: dict, this is used as the initial_state for the next optimization
         """
         final_state = {}
-        # Because of the nonantipativity constraints, we only need to report the state of scenario 1.
-        up_time, down_time = self._get_up_down_time(self.gen_dict["name"])
-
-        final_state["name"] = self.gen_dict["name"]
-        final_state["up_time"] = up_time
-        final_state["down_time"] = down_time
-        final_state["min_down_time"] = self.gen_dict["min_down_time"]
-        final_state["min_up_time"] = self.gen_dict["min_up_time"]
+        for key in self.gen_dict.keys():
+            final_state[key] = {}
+            # Because of the nonantipativity constraints, we only need to report the state of scenario 1.
+            up_time, down_time = self._get_up_down_time(self.gen_dict[key]["name"])
+            final_state[key]["name"] = self.gen_dict[key]["name"]
+            final_state[key]["up_time"] = up_time
+            final_state[key]["down_time"] = down_time
+            final_state[key]["min_down_time"] = self.gen_dict[key]["min_down_time"]
+            final_state[key]["min_up_time"] = self.gen_dict[key]["min_up_time"]
 
         return final_state
     
@@ -709,18 +821,19 @@ class StochasticPriceTaker(ConcreteModel):
         # get the power output from the model
         if not external_func:
             # if no external function is provided, we use the default calculation.
-            op_blks = self._get_operation_blocks(1, self.gen_dict['name'], ["power", "startup", "shutdown"])
-            
-            # calculate the actual revenue, the actual price is indexed from 0.
-            actual_elec_revenue = sum(actual_price[t-1] * value(op_blks[1][t].power) for t in self.set_planning_horizon)
-            actual_vom = sum(self.gen_dict["cost_curve"]["slope"] * value(op_blks[1][t].power) + self.gen_dict["cost_curve"]["intercept"] for t in self.set_planning_horizon)
-            
-            # calculate the startup and shutdown costs
-            actual_startup_cost = sum(value(op_blks[1][t].startup) * self.gen_dict["fuel_p"] * self.gen_dict["start_heat_cold"] for t in self.set_planning_horizon)
-            actual_shutdown_cost = sum(value(op_blks[1][t].shutdown) * self.gen_dict["fuel_p"] * 0 for t in self.set_planning_horizon)
+            for key in self.gen_dict.keys():
+                op_blks = self._get_operation_blocks(1, self.gen_dict[key]['name'], ["power", "startup", "shutdown"])
+                
+                # calculate the actual revenue, the actual price is indexed from 0.
+                actual_elec_revenue = sum(actual_price[t-1] * value(op_blks[1][t].power) for t in self.set_planning_horizon)
+                actual_vom = sum(self.gen_dict[key]["cost_curve"]["slope"] * value(op_blks[1][t].power) + self.gen_dict[key]["cost_curve"]["intercept"] for t in self.set_planning_horizon)
+                
+                # calculate the startup and shutdown costs
+                actual_startup_cost = sum(value(op_blks[1][t].startup) * self.gen_dict[key]["fuel_p"] * self.gen_dict[key]["start_heat_cold"] for t in self.set_planning_horizon)
+                actual_shutdown_cost = sum(value(op_blks[1][t].shutdown) * self.gen_dict[key]["fuel_p"] * 0 for t in self.set_planning_horizon)
 
-            # calculate the actual revenue
-            actual_profit = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
+                # calculate the actual revenue
+                actual_profit = actual_elec_revenue - actual_vom - actual_startup_cost - actual_shutdown_cost
         
         else:
             # if an external function is provided, we use it to calculate the revenue.
@@ -737,25 +850,26 @@ class StochasticPriceTaker(ConcreteModel):
         results["TerminationCondition"] = str(soln.solver.termination_condition)
         results["SolverStatus"] = str(soln.solver.status)
 
-        if not external_func_record:
-            # if no external function is provided, we use the default calculation.
-            operation_var_name = ["power", "startup", "shutdown", "op_mode"]
+        for key in self.gen_dict.keys():
+            if not external_func_record:
+                results["ObjectiveValue"] = value(self.obj)
+                results["ActualProfit"] = self.calculate_actual_revenue(actual_price)
+                # if no external function is provided, we use the default calculation.
+                operation_var_name = ["power", "startup", "shutdown", "op_mode"]
+                results[key] = {}
+                # record the objective value
+                for var_name in operation_var_name:
+                    pyomo_blks = self._get_operation_blocks(1, self.gen_dict[key]['name'], [var_name])
+                    results[f"OperationVariables_{key}_{var_name}"] = {
+                        d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
+                        for d in self.scenarios[1].set_days
+                    }
 
-            # record the objective value
-            results["ObjectiveValue"] = value(self.obj)
-            results["ActualProfit"] = self.calculate_actual_revenue(actual_price)
-            for var_name in operation_var_name:
-                pyomo_blks = self._get_operation_blocks(1, self.gen_dict['name'], [var_name])
-                results[f"OperationVariables_{var_name}"] = {
-                    d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
-                    for d in self.scenarios[1].set_days
-                }
+                results["IdeaProfit"] = sum(self.scenario_weight[s] * value(self.scenarios[s].period[1, t].net_hourly_cash_inflow) for s in self.set_scenarios for t in self.set_planning_horizon)
 
-            results["IdeaProfit"] = sum(self.scenario_weight[s] * value(self.scenarios[s].period[1, t].net_hourly_cash_inflow) for s in self.set_scenarios for t in self.set_planning_horizon)
-
-        else:
-            # if an external function is provided, we use it to record the results.
-            results = external_func_record(self, soln, actual_price, *args, **kwargs)
+            else:
+                # if an external function is provided, we use it to record the results.
+                results = external_func_record(self, soln, actual_price, *args, **kwargs)
 
         return results
 
@@ -784,54 +898,54 @@ def run_rolling_horizon(scenario,
     Returns:
         results_dict: dictionary, keys are periods, values are results.
     """
-    results_dict = {}
-    opt_solver = SolverFactory(solver)
+    # results_dict = {}
+    # opt_solver = SolverFactory(solver)
 
-    if periods:
-        # If the default periods is not 0 (specified by the user), use it. 
-        actual_periods = periods
+    # if periods:
+    #     # If the default periods is not 0 (specified by the user), use it. 
+    #     actual_periods = periods
 
-    else:
-        # Otherwise use the default periods in the forecaster (defined by len(price_signals)/planning_horizon).
-        actual_periods = forecaster.periods
+    # else:
+    #     # Otherwise use the default periods in the forecaster (defined by len(price_signals)/planning_horizon).
+    #     actual_periods = forecaster.periods
 
-    # for each period, build and solve the stochastic price-taker model, and record the results.
-    for i in range(actual_periods):
-        _logger.info(f"Building price-taker optimization for period {i}.")
-        # each i is the index of the period (e.g., day). Forecast the prices at that day.
-        lmp_data = forecaster.forecast_prices(pointer=i)
+    # # for each period, build and solve the stochastic price-taker model, and record the results.
+    # for i in range(actual_periods):
+    #     _logger.info(f"Building price-taker optimization for period {i}.")
+    #     # each i is the index of the period (e.g., day). Forecast the prices at that day.
+    #     lmp_data = forecaster.forecast_prices(pointer=i)
         
-        # create the stochastic price-taker model.
-        m = StochasticPriceTaker(scenario, horizon, planning_horizon)
+    #     # create the stochastic price-taker model.
+    #     m = StochasticPriceTaker(scenario, horizon, planning_horizon)
         
-        # check the lmp_data
-        m.lmp_check(lmp_data)
+    #     # check the lmp_data
+    #     m.lmp_check(lmp_data)
 
-        # build the stochastic price-taker model
-        m.build_stochastic_PT_model(
-            initial_state=init_state,
-            LMP_data=lmp_data,
-            design_func=design_func,
-            gen_dict=gen_dict,
-            flowsheet_func=flowsheet_func,
-            flowsheet_options=flowsheet_options,
-            nonanti_varnames=["power_to_grid"],
-        )
+    #     # build the stochastic price-taker model
+    #     m.build_stochastic_PT_model(
+    #         initial_state=init_state,
+    #         LMP_data=lmp_data,
+    #         design_func=design_func,
+    #         gen_dict=gen_dict,
+    #         flowsheet_func=flowsheet_func,
+    #         flowsheet_options=flowsheet_options,
+    #         nonanti_varnames=["power_to_grid"],
+    #     )
 
-        # Add objective function
-        m.set_objective_function()
+    #     # Add objective function
+    #     m.set_objective_function()
 
-        # solve the stochastic price-taker model
-        soln = opt_solver.solve(m, tee=True, options=solver_options)
+    #     # solve the stochastic price-taker model
+    #     soln = opt_solver.solve(m, tee=True, options=solver_options)
 
-        _logger.info("Solver status:", soln.solver.status)
-        _logger.info("Termination condition:", soln.solver.termination_condition)
-        _logger.info("Objective value:", value(m.obj))
+    #     _logger.info("Solver status:", soln.solver.status)
+    #     _logger.info("Termination condition:", soln.solver.termination_condition)
+    #     _logger.info("Objective value:", value(m.obj))
 
-        # record results
-        results_dict[i] = m.read_solution(soln)
-        # 
-        init_state = m.report_final_states()
+    #     # record results
+    #     results_dict[i] = m.read_solution(soln)
+    #     # 
+    #     init_state = m.report_final_states()
 
-    return results_dict
+    return
 
