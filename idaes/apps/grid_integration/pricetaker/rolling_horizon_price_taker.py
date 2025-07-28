@@ -35,8 +35,8 @@ from pyomo.common.config import (
     PositiveInt,
 )
 import numpy as np
-from idaes.core.util.config import ConfigurationError, is_in_range
-from idaes.apps.grid_integration import RHPTForecaster, PriceTakerModel, DesignModel, OperationModel
+from idaes.core.util.config import ConfigurationError
+from idaes.apps.grid_integration import PriceTakerModel, DesignModel, OperationModel
 import idaes.logger as idaeslog
 
 _logger = idaeslog.getLogger(__name__)
@@ -47,24 +47,35 @@ CONFIG = ConfigDict()
 
 # List of arguments needed for adding startup/shutdown constraints
 CONFIG.declare(
-    "up_time",
+    "scenario",
     ConfigValue(
         domain=PositiveInt,
-        doc="Minimum uptime [in hours]",
+        doc="Number of scenarios.",
     ),
 )
 CONFIG.declare(
-    "down_time",
+    "horizon",
     ConfigValue(
         domain=PositiveInt,
-        doc="Minimum downtime [in hours]",
+        doc="The length of the horizon.",
+    ),
+)
+CONFIG.declare(
+    "planning_horizon",
+    ConfigValue(
+        domain=PositiveInt,
+        doc="The length of the planning horizon.",
     ),
 )
 
-class StochasticPriceTaker(ConcreteModel):
-    """Builds a price-taker model for a given system"""
 
-    def __init__(self, scenario, horizon, planning_horizon, gen_dict, max_scenario=10, max_horizon=24*31,*args, **kwds):
+
+class StochasticPriceTaker(ConcreteModel):
+    """
+    Builds a scenario-based stochastic price-taker model for a given system.
+    """
+
+    def __init__(self, scenario, horizon, planning_horizon, gen_dict, max_scenario=10, max_horizon=24*31, *args, **kwds):
         """
         Args:
 
@@ -75,8 +86,8 @@ class StochasticPriceTaker(ConcreteModel):
         self.planning_horizon = planning_horizon
         self.gen_dict = gen_dict
         # Users can change the max_scenario and max_horizon to fit their needs.
-        self.max_scenario = max_scenario
-        self.max_horizon = max_horizon
+        self.max_scenario = max_scenario    # default max scenario is 10
+        self.max_horizon = max_horizon    # default max horizon is 24*31 (total number of hours in a month)
 
         self._config = CONFIG()
         self._has_hourly_cashflows = False
@@ -543,28 +554,44 @@ class StochasticPriceTaker(ConcreteModel):
         # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
         op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
 
+        def forced_on_rule(_, d, t):
+            
+            if time_need_to_stay_on == 0 or t > time_need_to_stay_on:
+                return Constraint.Skip
+            
+            else: 
+                return op_blks[d][t].op_mode == 1
+            
+        def forced_off_rule(_, d, t):
+
+            if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
+                return Constraint.Skip
+
+            else:
+                return op_blks[d][t].op_mode == 0
+
+
         if down_time > 0:
             # if the down time is greater than 0, the generator is off.
-            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 1).
-            # If the generator is on, at least it should be on for one hour.
+            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
             # The min_down_time should not exceed the horizon length.
-            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 1), self.horizon)
+            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
             scenario_model.initial_state_constraints = Constraint(
                 scenario_model.set_days,
                 scenario_model.set_time,
-                rule=lambda _, d, t: op_blks[d][t].op_mode == 0 if t <= time_need_to_stay_off else Constraint.Skip
+                rule=forced_off_rule,
             )
 
         if up_time > 0:
             # if the up time is greater than 0, the generator is on.
-            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 1).
-            # If the generator is off, at least it should be off for one hour.
+            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
             # The min_up_time should not exceed the horizon length.
-            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 1), self.horizon)
+            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
             scenario_model.initial_state_constraints = Constraint(
                 scenario_model.set_days,
                 scenario_model.set_time,
-                rule=lambda _, d, t: op_blks[d][t].op_mode == 1 if t <= time_need_to_stay_on else Constraint.Skip
+                time_need_to_stay_on,
+                rule=forced_on_rule,
             )
         
         return
