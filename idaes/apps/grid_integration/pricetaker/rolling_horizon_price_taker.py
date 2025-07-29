@@ -860,7 +860,7 @@ class StochasticPriceTaker(ConcreteModel):
                 # record the objective value
                 for var_name in operation_var_name:
                     pyomo_blks = self._get_operation_blocks(1, self.gen_dict[key]['name'], [var_name])
-                    results[f"OperationVariables_{key}_{var_name}"] = {
+                    results[key][f"OperationVariables_{var_name}"] = {
                         d: {t: value(getattr(pyomo_blks[d][t], var_name)) for t in self.set_planning_horizon}
                         for d in self.scenarios[1].set_days
                     }
