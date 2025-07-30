@@ -99,6 +99,10 @@ class StochasticPriceTaker(ConcreteModel):
         self.max_horizon = max_horizon    # default max horizon is 24*31 (total number of hours in a month)
 
         self._config = CONFIG()
+        # check the inputs
+        self._config.horizon = horizon
+        self._config.planning_horizon = planning_horizon
+        self._config.scenario = scenario
         self._has_hourly_cashflows = False
         self._has_overall_cashflows = False
         self._op_blk_uptime_downtime = {}
@@ -212,6 +216,13 @@ class StochasticPriceTaker(ConcreteModel):
             None
         """
         self._gen_dict = value
+
+
+    def _gen_dict_check(self):
+        """
+        Check the inputs from the gen_dict
+        """
+        return
 
 
     def param_check(self):
@@ -426,6 +437,8 @@ class StochasticPriceTaker(ConcreteModel):
         """        
         # add start up and shutdown constraints
         if startup_names:
+            # if we have startup and shutdown we need to consider the initial state.
+            self._skip_initialization = False
             for name in startup_names:
                 m.add_startup_shutdown(
                     op_block_name=name,
@@ -465,6 +478,7 @@ class StochasticPriceTaker(ConcreteModel):
 
     def default_weight_rule(self):
         return 1/len(self.set_scenarios)
+
 
     def generate_scenario_model_list(self,
                                      initial_state,
@@ -512,12 +526,6 @@ class StochasticPriceTaker(ConcreteModel):
                 flowsheet_func=flowsheet_func,
                 flowsheet_options=flowsheet_options,
             )
-
-            # initialize the scenario model, if it is empty, we just skip it. 
-            if initial_state:
-                for key in initial_state.keys():
-                    _logger.info(f"Initialize scenario model {s}.")
-                    self._initialize_scenario_model(scenario_model, initial_state[key])
             
             # populate the scenario model
             # adding capacity limit constraints
@@ -534,7 +542,12 @@ class StochasticPriceTaker(ConcreteModel):
             if ramping_names == None:
                 ramping_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
             self._populate_multiperiod_model_ramping(scenario_model, commodity, ramping_names=ramping_names)
-
+            
+            # initialize the scenario model, if it is empty, we just skip it. 
+            if initial_state:
+                for key in initial_state.keys():
+                    _logger.info(f"Initialize scenario model {s}.")
+                    self._initialize_scenario_model(scenario_model, initial_state[key], skip=self._skip_initialization)
 
             # add the cashflow for each scenario
             scenario_model.add_hourly_cashflows(
@@ -635,7 +648,7 @@ class StochasticPriceTaker(ConcreteModel):
         return
     
 
-    def _initialize_scenario_model(self, scenario_model, initial_state):
+    def _initialize_scenario_model(self, scenario_model, initial_state, skip=False):
         """
         Initialize the multiperiod model based on the results of the previous optimization.
         Consider the following initial states:
@@ -648,10 +661,13 @@ class StochasticPriceTaker(ConcreteModel):
         Args:
             scenario_model: the scenario model to be initialized.
             initial_state: dict, the initial state of the model.
+            skip: bool, if initialize the mode.
 
         Returns:
             None.
         """
+        if skip:
+            return
 
         up_time = initial_state["up_time"]
         down_time = initial_state["down_time"]
@@ -874,78 +890,118 @@ class StochasticPriceTaker(ConcreteModel):
         return results
 
 
-def run_rolling_horizon(scenario, 
-                        horizon, 
-                        planning_horizon, 
-                        forecaster, 
-                        gen_dict, 
-                        flowsheet_func, 
-                        flowsheet_options, 
-                        periods = 0,
-                        init_state = {}, 
-                        design_func=None, 
-                        solver="gurobi", 
-                        solver_options={}
-                        ):
+class RollinghorizonPriceTaker:
     """
-    Run the rolling horizon optimization. 
-
+    Rolling horizon stochastic price-taker optimization.
+    
     Args:
-        initial_state: dictionary, the initial state at the beginning of rolling horizon optimization.
         solver: dictionary, the solver for solving the optimization or simulation problem.
         solver_options: dictionary, the solver options.
-
-    Returns:
-        results_dict: dictionary, keys are periods, values are results.
     """
-    # results_dict = {}
-    # opt_solver = SolverFactory(solver)
-
-    # if periods:
-    #     # If the default periods is not 0 (specified by the user), use it. 
-    #     actual_periods = periods
-
-    # else:
-    #     # Otherwise use the default periods in the forecaster (defined by len(price_signals)/planning_horizon).
-    #     actual_periods = forecaster.periods
-
-    # # for each period, build and solve the stochastic price-taker model, and record the results.
-    # for i in range(actual_periods):
-    #     _logger.info(f"Building price-taker optimization for period {i}.")
-    #     # each i is the index of the period (e.g., day). Forecast the prices at that day.
-    #     lmp_data = forecaster.forecast_prices(pointer=i)
+    def __init__(self, 
+                 gen_dict: dict,
+                 solver: Optional[str]="gurobi",
+                 solver_options: Optional[dict]={},
+                 initial_on: Optional[bool]=True,
+                 ):
         
-    #     # create the stochastic price-taker model.
-    #     m = StochasticPriceTaker(scenario, horizon, planning_horizon)
+        self.gen_dict = gen_dict
+        self.solver = SolverFactory(solver)
+        self.solver_options = solver_options
+        self.initial_on = initial_on
+
+        # generate a default initial state
+        self.default_initial_state = {}
+        for gen in self.gen_dict.keys():
+            self.default_initial_state[gen] = {}
+            self.default_initial_state[gen]["name"] = gen
+            # the next line allows the generator to freely shutdown/startup at the first period.
+            if self.initial_on:
+                self.default_initial_state[gen]["up_time"] = gen_dict[gen]["min_up_time"] + 1
+                self.default_initial_state[gen]["down_time"] = 0
+            else:
+                self.default_initial_state[gen]["up_time"] = 0
+                self.default_initial_state[gen]["down_time"] = gen_dict[gen]["min_down_time"] + 1
         
-    #     # check the lmp_data
-    #     m.lmp_check(lmp_data)
 
-    #     # build the stochastic price-taker model
-    #     m.build_stochastic_PT_model(
-    #         initial_state=init_state,
-    #         LMP_data=lmp_data,
-    #         design_func=design_func,
-    #         gen_dict=gen_dict,
-    #         flowsheet_func=flowsheet_func,
-    #         flowsheet_options=flowsheet_options,
-    #         nonanti_varnames=["power_to_grid"],
-    #     )
+    @property
+    def periods(self):
+        """
+        Property getter for period.
 
-    #     # Add objective function
-    #     m.set_objective_function()
+        Returns:
+            int: saved periods value.
+        """
 
-    #     # solve the stochastic price-taker model
-    #     soln = opt_solver.solve(m, tee=True, options=solver_options)
+        return self._periods
 
-    #     _logger.info("Solver status:", soln.solver.status)
-    #     _logger.info("Termination condition:", soln.solver.termination_condition)
-    #     _logger.info("Objective value:", value(m.obj))
 
-    #     # record results
-    #     results_dict[i] = m.read_solution(soln)
-    #     # 
-    #     init_state = m.report_final_states()
+    @periods.setter
+    def scenario(self, value):
+        """
+        Property setter for periods.
 
-    return
+        Args:
+            value: intended value for periods.
+
+        Returns:
+            None.
+        """
+        self._periods = value
+            
+
+    def run_rolling_horizon(self,
+                            pt_building_func: Callable,
+                            forecaster: Callable,
+                            initial_state: Optional[dict]=None,
+                            start_period: Optional[int]=0,
+                            end_period: Optional[int]=None,
+                            *args, **kwargs
+                            ):
+        """
+        Run the rolling horizon optimization. 
+
+        Args:
+            initial_state: dictionary, the initial state at the beginning of rolling horizon optimization.
+
+        Returns:
+            results_dict: dictionary, keys are periods, values are results.
+        """
+        if end_period == None:
+            # set the end period equal to the length of lmp signals
+            end_period = len(forecaster.reshaped_signals)
+
+        if initial_state == None:
+            # if no initial state, use the default initial state
+            initial_state = self.default_initial_state
+        
+        if end_period - start_period < 0:
+            # check the valid start and end period
+            raise ValueError("The end_period should be equal or greater than the starting period.")
+
+        # set up dictionarys to store the results.
+        results_dict = {}
+
+        # for each period, build and solve the stochastic price-taker model, and record the results.
+        for i in range(start_period, end_period):
+            _logger.info(f"Building price-taker optimization for period {i}.")
+            # each i is the index of the period (e.g., day). Forecast the prices at that day.
+            lmp_data = forecaster.forecast_prices(pointer=i)
+            
+            m = pt_building_func(initial_state=initial_state, *args, **kwargs)
+
+            # solve the stochastic price-taker model
+            soln = opt_solver.solve(m, tee=True, options=solver_options)
+
+            _logger.info("Solver status:", soln.solver.status)
+            _logger.info("Termination condition:", soln.solver.termination_condition)
+            _logger.info("Objective value:", value(m.obj))
+
+            # record results
+            actual_price = forecaster.fetch_original_signal(pointer=i)
+            results_dict[i] = m.record_solution(soln, actual_price)
+            
+            initial_state = m.report_final_states()
+
+        return results_dict[i]
 
