@@ -849,7 +849,7 @@ class StochasticPriceTaker(ConcreteModel):
                 
                 # calculate the actual revenue, the actual price is indexed from 0.
                 actual_elec_revenue = sum(actual_price[t-1] * value(op_blks[1][t].power) for t in self.set_planning_horizon)
-                actual_vom = sum(value(op_blks[1][t].op_mode)*(self.gen_dict[key]["cost_curve"]["slope"] * value(op_blks[1][t].power) + self.gen_dict[key]["cost_curve"]["intercept"]) for t in self.set_planning_horizon)
+                actual_vom = sum((self.gen_dict[key]["cost_curve"]["slope"] * value(op_blks[1][t].power) + value(op_blks[1][t].op_mode) * self.gen_dict[key]["cost_curve"]["intercept"]) for t in self.set_planning_horizon)
 
                 # calculate the startup and shutdown costs
                 actual_startup_cost = sum(value(op_blks[1][t].startup) * self.gen_dict[key]["fuel_p"] * self.gen_dict[key]["start_heat_cold"] for t in self.set_planning_horizon)
