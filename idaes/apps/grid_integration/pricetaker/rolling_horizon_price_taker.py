@@ -648,7 +648,7 @@ class StochasticPriceTaker(ConcreteModel):
         return
     
 
-    def _initialize_scenario_model(self, scenario_model, initial_state, skip=False):
+    def _initialize_scenario_model(self, scenario_model, initial_state, external_function=None, skip=False, *args, **kwargs):
         """
         Initialize the multiperiod model based on the results of the previous optimization.
         Consider the following initial states:
@@ -667,59 +667,65 @@ class StochasticPriceTaker(ConcreteModel):
             None.
         """
         if skip:
+            _logger.info("Skipping the initialization of the scenario model.")
             return
-
-        up_time = initial_state["up_time"]
-        down_time = initial_state["down_time"]
-
-        if up_time == 0 and down_time == 0:
-            # if the up time and down time are both 0, the initial state is wrong.
-            raise ValueError("The initial state is not valid, both up time and down time are 0.")
         
-        if down_time * up_time != 0:
-            # if both up time and down time are not 0, the initial state is wrong.
-            raise ValueError("The initial state is not valid, both up time and down time are not 0.")
-        # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
-        op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
+        if external_function:
+            # if an external function is provided, we use it to initialize the model.
+            external_function(scenario_model, initial_state, *args, **kwargs)
+        
+        else:
+            up_time = initial_state["up_time"]
+            down_time = initial_state["down_time"]
 
-        def forced_on_rule(_, d, t):
+            if up_time == 0 and down_time == 0:
+                # if the up time and down time are both 0, the initial state is wrong.
+                raise ValueError("The initial state is not valid, both up time and down time are 0.")
             
-            if time_need_to_stay_on == 0 or t > time_need_to_stay_on:
-                return Constraint.Skip
-            
-            else: 
-                return op_blks[d][t].op_mode == 1
-            
-        def forced_off_rule(_, d, t):
+            if down_time * up_time != 0:
+                # if both up time and down time are not 0, the initial state is wrong.
+                raise ValueError("The initial state is not valid, both up time and down time are not 0.")
+            # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
+            op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
 
-            if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
-                return Constraint.Skip
+            def forced_on_rule(_, d, t):
+                
+                if time_need_to_stay_on == 0 or t > time_need_to_stay_on:
+                    return Constraint.Skip
+                
+                else: 
+                    return op_blks[d][t].op_mode == 1
+                
+            def forced_off_rule(_, d, t):
 
-            else:
-                return op_blks[d][t].op_mode == 0
+                if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
+                    return Constraint.Skip
 
-        if down_time > 0:
-            # if the down time is greater than 0, the generator is off.
-            # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
-            # The min_down_time should not exceed the horizon length.
-            time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
-            scenario_model.initial_state_constraints = Constraint(
-                scenario_model.set_days,
-                scenario_model.set_time,
-                rule=forced_off_rule,
-            )
+                else:
+                    return op_blks[d][t].op_mode == 0
 
-        if up_time > 0:
-            # if the up time is greater than 0, the generator is on.
-            # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
-            # The min_up_time should not exceed the horizon length.
-            time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
-            scenario_model.initial_state_constraints = Constraint(
-                scenario_model.set_days,
-                scenario_model.set_time,
-                time_need_to_stay_on,
-                rule=forced_on_rule,
-            )
+            if down_time > 0:
+                # if the down time is greater than 0, the generator is off.
+                # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
+                # The min_down_time should not exceed the horizon length.
+                time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
+                scenario_model.initial_state_constraints = Constraint(
+                    scenario_model.set_days,
+                    scenario_model.set_time,
+                    rule=forced_off_rule,
+                )
+
+            if up_time > 0:
+                # if the up time is greater than 0, the generator is on.
+                # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
+                # The min_up_time should not exceed the horizon length.
+                time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
+                scenario_model.initial_state_constraints = Constraint(
+                    scenario_model.set_days,
+                    scenario_model.set_time,
+                    time_need_to_stay_on,
+                    rule=forced_on_rule,
+                )
         
         return
     
@@ -922,33 +928,7 @@ class RollinghorizonPriceTaker:
             else:
                 self.default_initial_state[gen]["up_time"] = 0
                 self.default_initial_state[gen]["down_time"] = gen_dict[gen]["min_down_time"] + 1
-        
-
-    @property
-    def periods(self):
-        """
-        Property getter for period.
-
-        Returns:
-            int: saved periods value.
-        """
-
-        return self._periods
-
-
-    @periods.setter
-    def scenario(self, value):
-        """
-        Property setter for periods.
-
-        Args:
-            value: intended value for periods.
-
-        Returns:
-            None.
-        """
-        self._periods = value
-            
+                    
 
     def run_rolling_horizon(self,
                             pt_building_func: Callable,
@@ -991,7 +971,7 @@ class RollinghorizonPriceTaker:
             m = pt_building_func(initial_state=initial_state, *args, **kwargs)
 
             # solve the stochastic price-taker model
-            soln = opt_solver.solve(m, tee=True, options=solver_options)
+            soln = self.solver.solve(m, tee=True, options=self.solver_options)
 
             _logger.info("Solver status:", soln.solver.status)
             _logger.info("Termination condition:", soln.solver.termination_condition)
@@ -1004,4 +984,3 @@ class RollinghorizonPriceTaker:
             initial_state = m.report_final_states()
 
         return results_dict[i]
-
