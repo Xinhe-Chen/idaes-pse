@@ -723,7 +723,6 @@ class StochasticPriceTaker(ConcreteModel):
                 scenario_model.initial_state_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
-                    time_need_to_stay_on,
                     rule=forced_on_rule,
                 )
         
