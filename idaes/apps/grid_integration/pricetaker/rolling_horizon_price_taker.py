@@ -690,8 +690,12 @@ class StochasticPriceTaker(ConcreteModel):
 
             def forced_on_rule(_, d, t):
                 
-                if time_need_to_stay_on == 0 or t > time_need_to_stay_on:
+                if t > time_need_to_stay_on and time_need_to_stay_on > 0:
                     return Constraint.Skip
+                
+                elif time_need_to_stay_on == 0:
+                    last_op_mode = 1
+                    return op_blks[d][1].op_mode - last_op_mode == op_blks[d][1].startup - op_blks[d][1].shutdown
                 
                 else: 
                     return op_blks[d][t].op_mode == 1
@@ -700,7 +704,11 @@ class StochasticPriceTaker(ConcreteModel):
 
                 if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
                     return Constraint.Skip
-
+                
+                elif time_need_to_stay_off == 0:
+                    last_op_mode = 0
+                    return op_blks[d][1].op_mode - last_op_mode == op_blks[d][1].startup - op_blks[d][1].shutdown
+                
                 else:
                     return op_blks[d][t].op_mode == 0
 
