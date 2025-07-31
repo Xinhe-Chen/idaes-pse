@@ -773,10 +773,12 @@ class StochasticPriceTaker(ConcreteModel):
             down_time: int, the minimum down time.
         """
         # get the operation blocks for scenario 1
-        startups, shutdowns, op_mode = self._get_startup_shutdown_states(self, op_block_name)
+        startups, shutdowns, op_mode = self._get_startup_shutdown_states(op_block_name)
         
         # The set of d should be {1}, so here we make the opmode as a list
         op_mode_list = [op_mode[1][t] for t in self.set_planning_horizon]
+        # startups_sum = sum([startups[1][t] for t in self.set_planning_horizon])
+        # shutdowns_sum = sum([shutdowns[1][t] for t in self.set_planning_horizon])
 
         down_time = 0
         up_time = 0
@@ -981,6 +983,6 @@ class RollinghorizonPriceTaker:
             actual_price = forecaster.fetch_original_signal(pointer=i)
             results_dict[i] = m.record_solution(soln, actual_price)
             
-            initial_state = m.report_final_states()
+            initial_state = m.report_final_state()
 
         return results_dict[i]
