@@ -547,7 +547,7 @@ class StochasticPriceTaker(ConcreteModel):
             if initial_state:
                 for key in initial_state.keys():
                     _logger.info(f"Initialize scenario model {s}.")
-                    self._initialize_scenario_model(scenario_model, initial_state[key], skip=False)
+                    self._initialize_scenario_model(scenario_model, initial_state[key], skip=self._skip_initialization)
 
             # add the cashflow for each scenario
             scenario_model.add_hourly_cashflows(
@@ -687,7 +687,7 @@ class StochasticPriceTaker(ConcreteModel):
                 raise ValueError("The initial state is not valid, both up time and down time are not 0.")
             # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
             op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
-
+            
             def forced_on_rule(_, d, t, time_need_to_stay_on):
                 
                 if t > time_need_to_stay_on and time_need_to_stay_on > 0:
@@ -702,7 +702,7 @@ class StochasticPriceTaker(ConcreteModel):
                 
             def forced_off_rule(_, d, t, time_need_to_stay_off):
 
-                if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
+                if time_need_to_stay_off > 0 and t > time_need_to_stay_off:
                     return Constraint.Skip
                 
                 elif time_need_to_stay_off == 0:
@@ -712,18 +712,17 @@ class StochasticPriceTaker(ConcreteModel):
                 else:
                     return op_blks[d][t].op_mode == 0
 
-            if down_time >= 0:
+            if down_time > 0:
                 # if the down time is greater than 0, the generator is off.
                 # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
                 # The min_down_time should not exceed the horizon length.
                 _logger.info(f"Initializing the scenario model with down time constraints.")
                 time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
-                scenario_model.initial_state_down_constraints = Constraint(
+                scenario_model.initial_forced_down_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
                     rule=lambda _, d, t: forced_off_rule(_, d, t, time_need_to_stay_off),
                 )
-                scenario_model.initial_state_down_constraints.pprint()
 
             if up_time >= 0:
                 # if the up time is greater than 0, the generator is on.
