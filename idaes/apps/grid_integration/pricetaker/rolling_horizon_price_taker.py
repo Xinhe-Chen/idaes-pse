@@ -688,7 +688,7 @@ class StochasticPriceTaker(ConcreteModel):
             # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
             op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
 
-            def forced_on_rule(_, d, t):
+            def forced_on_rule(_, d, t, time_need_to_stay_on):
                 
                 if t > time_need_to_stay_on and time_need_to_stay_on > 0:
                     return Constraint.Skip
@@ -700,7 +700,7 @@ class StochasticPriceTaker(ConcreteModel):
                 else: 
                     return op_blks[d][t].op_mode == 1
                 
-            def forced_off_rule(_, d, t):
+            def forced_off_rule(_, d, t, time_need_to_stay_off):
 
                 if time_need_to_stay_off == 0 or t > time_need_to_stay_off:
                     return Constraint.Skip
@@ -720,7 +720,7 @@ class StochasticPriceTaker(ConcreteModel):
                 scenario_model.initial_state_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
-                    rule=forced_off_rule,
+                    rule=lambda _, d, t: forced_off_rule(_, d, t, time_need_to_stay_off),
                 )
 
             if up_time > 0:
@@ -731,7 +731,7 @@ class StochasticPriceTaker(ConcreteModel):
                 scenario_model.initial_state_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
-                    rule=forced_on_rule,
+                    rule=lambda _, d, t: forced_on_rule(_, d, t, time_need_to_stay_on),
                 )
         
         return
