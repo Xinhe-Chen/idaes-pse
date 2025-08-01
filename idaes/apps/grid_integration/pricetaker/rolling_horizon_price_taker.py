@@ -547,7 +547,7 @@ class StochasticPriceTaker(ConcreteModel):
             if initial_state:
                 for key in initial_state.keys():
                     _logger.info(f"Initialize scenario model {s}.")
-                    self._initialize_scenario_model(scenario_model, initial_state[key], skip=self._skip_initialization)
+                    self._initialize_scenario_model(scenario_model, initial_state[key], skip=False)
 
             # add the cashflow for each scenario
             scenario_model.add_hourly_cashflows(
@@ -716,6 +716,7 @@ class StochasticPriceTaker(ConcreteModel):
                 # if the down time is greater than 0, the generator is off.
                 # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
                 # The min_down_time should not exceed the horizon length.
+                _logger.info(f"Initializing the scenario model with down time constraints.")
                 time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
                 scenario_model.initial_state_down_constraints = Constraint(
                     scenario_model.set_days,
@@ -727,6 +728,7 @@ class StochasticPriceTaker(ConcreteModel):
                 # if the up time is greater than 0, the generator is on.
                 # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
                 # The min_up_time should not exceed the horizon length.
+                _logger.info(f"Initializing the scenario model with up time constraints.")
                 time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
                 scenario_model.initial_state_up_constraints = Constraint(
                     scenario_model.set_days,
