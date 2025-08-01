@@ -717,10 +717,10 @@ class StochasticPriceTaker(ConcreteModel):
                 # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
                 # The min_down_time should not exceed the horizon length.
                 time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
-                scenario_model.initial_state_constraints = Constraint(
+                scenario_model.initial_state_down_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
-                    rule=lambda _, d, t: forced_off_rule(op_blks, d, t, time_need_to_stay_off),
+                    rule=lambda _, d, t: forced_off_rule(_, d, t, time_need_to_stay_off),
                 )
 
             if up_time > 0:
@@ -728,10 +728,10 @@ class StochasticPriceTaker(ConcreteModel):
                 # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
                 # The min_up_time should not exceed the horizon length.
                 time_need_to_stay_on = min(max(initial_state["min_up_time"] - up_time, 0), self.horizon)
-                scenario_model.initial_state_constraints = Constraint(
+                scenario_model.initial_state_up_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
-                    rule=lambda _, d, t: forced_on_rule(op_blks, d, t, time_need_to_stay_on),
+                    rule=lambda _, d, t: forced_on_rule(_, d, t, time_need_to_stay_on),
                 )
         
         return
