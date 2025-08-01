@@ -723,6 +723,7 @@ class StochasticPriceTaker(ConcreteModel):
                     scenario_model.set_time,
                     rule=lambda _, d, t: forced_off_rule(_, d, t, time_need_to_stay_off),
                 )
+                scenario_model.initial_state_down_constraints.pprint()
 
             if up_time > 0:
                 # if the up time is greater than 0, the generator is on.
