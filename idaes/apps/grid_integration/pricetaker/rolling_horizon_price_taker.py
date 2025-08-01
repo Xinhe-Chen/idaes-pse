@@ -718,7 +718,7 @@ class StochasticPriceTaker(ConcreteModel):
                 # The min_down_time should not exceed the horizon length.
                 _logger.info(f"Initializing the scenario model with down time constraints.")
                 time_need_to_stay_off = min(max(initial_state["min_down_time"] - down_time, 0), self.horizon)
-                scenario_model.initial_forced_down_constraints = Constraint(
+                scenario_model.initial_state_down_constraints = Constraint(
                     scenario_model.set_days,
                     scenario_model.set_time,
                     rule=lambda _, d, t: forced_off_rule(_, d, t, time_need_to_stay_off),
