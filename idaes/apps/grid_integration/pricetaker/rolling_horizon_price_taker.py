@@ -75,13 +75,15 @@ class StochasticPriceTaker(ConcreteModel):
     Builds a scenario-based stochastic price-taker model for a given system.
     """
 
-    def __init__(self, scenario: int, 
-                 horizon: int, 
-                 planning_horizon: int, 
-                 gen_dict: dict, 
-                 max_scenario: Optional[int] = 10, 
-                 max_horizon: Optional[int]=24*31, 
-                 *args, **kwds):
+    def __init__(
+            self, scenario: int, 
+            horizon: int, 
+            planning_horizon: int, 
+            gen_dict: dict, 
+            max_scenario: Optional[int] = 10, 
+            max_horizon: Optional[int]=24*31, 
+            *args, **kwds
+    ):
         """
         Args:
             scenario: int, number of scenarios in the stochastic price-taker.
@@ -116,7 +118,7 @@ class StochasticPriceTaker(ConcreteModel):
             raise ValueError(f"The planning horizon {self.planning_horizon} should not exceed {self.horizon}.")
 
         self.param_check()
-    
+
 
     @property
     def scenario(self):
@@ -227,10 +229,10 @@ class StochasticPriceTaker(ConcreteModel):
 
     def param_check(self):
         """
-        Check the input parameters.
+        Check the input parameters are reasonable.
 
         Args:
-            lmp_data, array like lmp signals with shape (self.scenario, self.horizon)
+            None
 
         Returns:
             None
@@ -252,6 +254,38 @@ class StochasticPriceTaker(ConcreteModel):
 
         return
 
+
+    def _gen_dict_check(self):
+        """
+        Check the inputs from the gen_dict
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if not isinstance(self.gen_dict, dict):
+            raise ValueError("The gen_dict should be a dictionary.")
+
+        if len(self.gen_dict) == 0:
+            raise ValueError("The gen_dict is empty.")
+
+        for key in self.gen_dict.keys():
+            if "max_p" not in self.gen_dict[key]:
+                raise ValueError(f"The generator {key} does not have max_p defined.")
+            if "min_p" not in self.gen_dict[key]:
+                raise ValueError(f"The generator {key} does not have min_p defined.")
+            if "min_up_time" not in self.gen_dict[key]:
+                raise ValueError(f"The generator {key} does not have min_up_time defined.")
+            if "min_down_time" not in self.gen_dict[key]:
+                raise ValueError(f"The generator {key} does not have min_down_time defined.")
+            if "ramp" not in self.gen_dict[key]:
+                raise ValueError(f"The generator {key} does not have ramp defined.")
+
+        _logger.info(f"The gen_dict has been checked and is valid with {len(self.gen_dict)} generators.")
+
+        return
     
     def lmp_check(self, lmp_data: Union[List, np.ndarray, pd.DataFrame]):
         """
@@ -365,17 +399,20 @@ class StochasticPriceTaker(ConcreteModel):
 
 
     @staticmethod
-    def build_PT_model(LMP_data: Union[List, np.ndarray, pd.DataFrame], 
-                       design_func_dict: dict,
-                       design_params: dict, 
-                       flowsheet_func: Callable, 
-                       flowsheet_options: dict):
+    def build_PT_model(
+        LMP_data: Union[List, np.ndarray, pd.DataFrame], 
+        design_func_dict: dict,
+        design_params: dict, 
+        flowsheet_func: Callable, 
+        flowsheet_options: dict
+    ):
         """
         Build a stochastic optimization problem, each scenario is with the length of self.horizon.
         
         Args: 
             LMP_data: array like, the LMP data used for building the price-taker problem.
-            design_func: list, list of functions. Making this into list enables define different design funcs.
+            design_func: dict, keys are generator/component names, values are the corresponding functions. 
+                        Making this into a dict enables defining different design funcs.
 
         Returns:
             m: pyomo model, return this model can allow the user to further add constraints.
@@ -387,6 +424,7 @@ class StochasticPriceTaker(ConcreteModel):
         # Append the LMP data to the PT model
         m.append_lmp_data(LMP_data)
         
+        # build design blocks for each generator/component
         for key in list(design_params.keys()):
             setattr(m, 
                     f"gen_design_{design_params[key]['name']}", 
@@ -401,13 +439,19 @@ class StochasticPriceTaker(ConcreteModel):
         return m
 
 
-    def _populate_multiperiod_model_capacity(self, m, commodity, capacity_names=None):
+    def _populate_multiperiod_model_capacity(
+            self,
+            m: ConcreteModel, 
+            commodity: str, 
+            capacity_names: Optional[List[str]] = None
+    ):
         """
         Populate the multiperiod model for the price-taker model. Add the capacity limit constraints.
 
         Args:
             m: scenario pyomo model instance.
             commodity: str, name of the commodity on the model the capacity constraints.
+            capacity_names: list of str, names of the generators that need capacity constraints.
 
         Returns:
             None
@@ -424,13 +468,18 @@ class StochasticPriceTaker(ConcreteModel):
 
         return
 
-    def _populate_multiperiod_model_startup_shutdown(self, m, startup_names=None):
+    def _populate_multiperiod_model_startup_shutdown(
+            self, 
+            m: ConcreteModel, 
+            startup_names: Optional[List[str]] = None
+    ):
         """
         Populate the multiperiod model for the price-taker model. Add the startup/shutdown constraints.
 
         Args:
             m: scenario pyomo model instance.
             commodity: str, name of the commodity on the model the capacity constraints.
+            startup_names: list of str, names of the generators that need startup/shutdown constraints.
 
         Returns:
             None
@@ -449,13 +498,19 @@ class StochasticPriceTaker(ConcreteModel):
         return
     
 
-    def _populate_multiperiod_model_ramping(self, m, commodity, ramping_names=None):
+    def _populate_multiperiod_model_ramping(
+            self, 
+            m: ConcreteModel, 
+            commodity: str, 
+            ramping_names: Optional[List[str]] = None
+    ):
         """
         Populate the multiperiod model for the price-taker model. Add the startup/shutdown constraints.
 
         Args:
             m: scenario pyomo model instance.
             commodity: str, name of the commodity on the model the capacity constraints.
+            ramping_names: list of str, names of the generators that need ramping constraints.
 
         Returns:
             None
@@ -477,29 +532,61 @@ class StochasticPriceTaker(ConcreteModel):
 
 
     def default_weight_rule(self):
+        """
+        Default weight rule for the scenarios, equal probability for each scenario.
+        
+        Args:
+            None
+
+        Returns:
+            float: the weight for each scenario.
+        """
         return 1/len(self.set_scenarios)
 
 
-    def generate_scenario_model_list(self,
-                                     initial_state,
-                                     LMP_data, 
-                                     design_func_dict,
-                                     design_params,
-                                     flowsheet_func,
-                                     flowsheet_options,
-                                     commodity,
-                                     revenue_streams=["elec_revenue"],
-                                     operational_costs=None, 
-                                     corporate_tax_rate=0,
-                                     weight_rule=default_weight_rule,
-                                     capacity_names=None,
-                                     startup_names=None,
-                                     ramping_names=None,
-                                     ):
+    def generate_scenario_model_list(
+            self,
+            initial_state: dict,
+            LMP_data: Union[List, np.ndarray, pd.DataFrame],
+            design_func_dict: dict,
+            design_params: dict,
+            flowsheet_func: Callable,
+            flowsheet_options: dict,
+            commodity: str,
+            revenue_streams: List[str],
+            operational_costs: Optional[dict] = None,
+            corporate_tax_rate: Optional[float] = 0,
+            weight_rule: Optional[Callable] = default_weight_rule,
+            capacity_names: Optional[Union[List[str], str, None]] = "default",
+            startup_names: Optional[Union[List[str], str, None]] = "default",
+            ramping_names: Optional[Union[List[str], str, None]] = "default",
+    ):
         """
         Returns a list containing the scenario models.
         This enables user to customize the scenario models before they become a part of the stochastic program.
         
+        Args:
+            initial_state: dict, the initial state of the scenario model.
+            LMP_data: list, the LMP data for the scenarios, generated from forecaster, with shape (self.scenario, self.horizon).
+            design_func_dict: dict, keys are generator/component names, values are the corresponding functions.
+            design_params: dict, the parameters for the design functions.
+            flowsheet_func: function, the function to build the flowsheet model.
+            flowsheet_options: dict, the options for the flowsheet model.
+            commodity: str, name of the commodity on the model the capacity constraints.
+            revenue_streams: list of str, the revenue streams for the cashflow.
+            operational_costs: list of str, the operational costs for the cashflow.
+            corporate_tax_rate: float, the corporate tax rate for the cashflow.
+            weight_rule: function, the weight rule for the scenarios, default is 1/number of scenarios.
+            capacity_names: list of str or "default" or None, names of the generators that need capacity constraints, 
+                            if "default", it will add capacity constraints for all generators in gen_dict.
+            startup_names: list of str or "default" or None, names of the generators that need startup/shutdown constraints, 
+                            if "default", it will add startup/shutdown constraints for all generators in gen_dict.
+            ramping_names: list of str or "default" or None, names of the generators that need ramping constraints, 
+                            if "default", it will add ramping constraints for all generators in gen_dict.
+
+        
+        Returns:
+            scenario_model_list: list, the list of scenario models.
         """
         # set of the scenarios
         self.set_scenarios = RangeSet(self.scenario)
@@ -527,19 +614,19 @@ class StochasticPriceTaker(ConcreteModel):
                 flowsheet_options=flowsheet_options,
             )
             
-            # populate the scenario model
+            # populate the scenario model with capacity, startup/shutdown, and ramping constraints
             # adding capacity limit constraints
-            if capacity_names == None:
+            if capacity_names == "default":
                 capacity_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
             self._populate_multiperiod_model_capacity(scenario_model, commodity, capacity_names=capacity_names)
 
             # adding startup_shutdown constraints
-            if startup_names == None:
+            if startup_names == "default":
                 startup_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
             self._populate_multiperiod_model_startup_shutdown(scenario_model, startup_names=startup_names)
 
             # adding ramping constraints
-            if ramping_names == None:
+            if ramping_names == "default":
                 ramping_names = [self.gen_dict[key]["name"] for key in list(self.gen_dict.keys())]
             self._populate_multiperiod_model_ramping(scenario_model, commodity, ramping_names=ramping_names)
             
@@ -565,18 +652,17 @@ class StochasticPriceTaker(ConcreteModel):
         return scenario_model_list
 
 
-
-    def build_stochastic_PT_model(self, scenario_model_list, nonanti_varnames):
+    def build_stochastic_PT_model(
+            self, 
+            scenario_model_list: list,
+            nonanti_varnames: list
+    ):
         """
         Build the stochastic price-taker model
 
         Args:
-            initial_state: dict, the initial state of the model.
-            LMP_data: list, the LMP data for the scenarios, generated from forecaster, with shape (self.scenario, self.horizon).
-            flowsheet_func: function, the function to build the flowsheet model.
-            flowsheet_options: dict, the options for the flowsheet model.
+            scenario_model_list: list, the list of scenario models.
             nonanti_varnames: list, the variable names that need to be nonantipative.
-            weight_rule: function, the weight rule for the scenarios, default is 1/number of scenarios.
         
         Returns:
             None
@@ -597,7 +683,7 @@ class StochasticPriceTaker(ConcreteModel):
         return
 
 
-    def _add_nonantipativity_constraints(self, s, var_name):
+    def _add_nonantipativity_constraints(self, s: int, var_name: str):
         """
         Add nonantipativity constraints.
 
@@ -648,7 +734,14 @@ class StochasticPriceTaker(ConcreteModel):
         return
     
 
-    def _initialize_scenario_model(self, scenario_model, initial_state, external_function=None, skip=False, *args, **kwargs):
+    def _initialize_scenario_model(
+            self, 
+            scenario_model: ConcreteModel, 
+            initial_state: dict, 
+            external_function: Optional[Callable] = None, 
+            skip: Optional[bool] = False, 
+            *args, **kwargs
+    ):
         """
         Initialize the multiperiod model based on the results of the previous optimization.
         Consider the following initial states:
@@ -661,6 +754,7 @@ class StochasticPriceTaker(ConcreteModel):
         Args:
             scenario_model: the scenario model to be initialized.
             initial_state: dict, the initial state of the model.
+            external_function: function, if provided, this function will be used to initialize the model.
             skip: bool, if initialize the mode.
 
         Returns:
@@ -685,11 +779,14 @@ class StochasticPriceTaker(ConcreteModel):
             if down_time * up_time != 0:
                 # if both up time and down time are not 0, the initial state is wrong.
                 raise ValueError("The initial state is not valid, both up time and down time are not 0.")
+            
             # get the operation blocks for scenario, the _get_operation_blocks function is from the PriceTaker class. 
             op_blks = scenario_model._get_operation_blocks(initial_state["name"], ["startup", "shutdown", "op_mode"])
             
             def forced_on_rule(_, d, t, time_need_to_stay_on):
-                
+                """
+                Force the generator to stay on for a certain amount of time. (due to the min up time from the previous optimization)
+                """
                 if t > time_need_to_stay_on and time_need_to_stay_on > 0:
                     return Constraint.Skip
                 
@@ -701,7 +798,9 @@ class StochasticPriceTaker(ConcreteModel):
                     return op_blks[d][t].op_mode == 1
                 
             def forced_off_rule(_, d, t, time_need_to_stay_off):
-
+                """
+                Force the generator to stay off for a certain amount of time. (due to the min down time from the previous optimization)
+                """
                 if time_need_to_stay_off > 0 and t > time_need_to_stay_off:
                     return Constraint.Skip
                 
@@ -739,7 +838,7 @@ class StochasticPriceTaker(ConcreteModel):
         return
     
 
-    def _get_startup_shutdown_states(self, op_block_name):
+    def _get_startup_shutdown_states(self, op_block_name: str):
         """
         Get the number of startups for the given operational block.
 
@@ -770,7 +869,7 @@ class StochasticPriceTaker(ConcreteModel):
         return startups, shutdowns, op_mode
 
 
-    def _get_up_down_time(self, op_block_name):
+    def _get_up_down_time(self, op_block_name: str):
         """
         Calculate the up time and down time for scenario by the end of planning horizon.
 
@@ -840,12 +939,17 @@ class StochasticPriceTaker(ConcreteModel):
         return final_state
     
 
-    def calculate_actual_revenue(self, actual_price, external_func=None, *args, **kwargs):
+    def calculate_actual_revenue(
+            self, 
+            actual_price: list, 
+            external_func: Optional[Callable] = None, 
+            *args, **kwargs
+    ):
         """
         Calculate the actual revenue based on the actual price and the power output.
 
         Args:
-            actual_price: list, the actual price for each time period.
+            actual_price: list, the actual price for each time period. (can be obtained from the forecaster)
             external_func: function, an external function to calculate the revenue, if not provided, the default calculation will be used.
 
         Returns:
@@ -875,9 +979,21 @@ class StochasticPriceTaker(ConcreteModel):
         return float(actual_profit)
 
 
-    def record_solution(self, soln, actual_price, external_func_record=None, *args, **kwargs):
+    def record_solution(self, 
+                        soln: Callable, 
+                        actual_price: list, 
+                        external_func_record: Optional[Callable] = None, 
+                        *args, **kwargs):
         """
         record the results from solved model.
+
+        Args:
+            soln: the solution object from the solver. 
+            actual_price: list, the actual price for each time period. (can be obtained from the forecaster)
+            external_func_record: function, an external function to record the results, if not provided,
+
+        Returns:
+            results: dict, the results of the optimization.
         """
         results = {}
         results["TerminationCondition"] = str(soln.solver.termination_condition)
