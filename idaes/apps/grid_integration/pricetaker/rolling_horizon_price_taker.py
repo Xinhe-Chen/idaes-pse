@@ -712,7 +712,7 @@ class StochasticPriceTaker(ConcreteModel):
                 else:
                     return op_blks[d][t].op_mode == 0
 
-            if down_time > 0:
+            if down_time >= 0:
                 # if the down time is greater than 0, the generator is off.
                 # constraint the first x_hour to be off where x = max(min_down_time - down_time, 0).
                 # The min_down_time should not exceed the horizon length.
@@ -725,7 +725,7 @@ class StochasticPriceTaker(ConcreteModel):
                 )
                 scenario_model.initial_state_down_constraints.pprint()
 
-            if up_time > 0:
+            if up_time >= 0:
                 # if the up time is greater than 0, the generator is on.
                 # constraint the first x_hour to be on where x = max(min_up_time - up_time, 0).
                 # The min_up_time should not exceed the horizon length.
