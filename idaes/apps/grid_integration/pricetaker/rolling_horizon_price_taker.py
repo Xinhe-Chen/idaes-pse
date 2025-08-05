@@ -76,7 +76,8 @@ class StochasticPriceTaker(ConcreteModel):
     """
 
     def __init__(
-            self, scenario: int, 
+            self, 
+            scenario: int, 
             horizon: int, 
             planning_horizon: int, 
             gen_dict: dict, 
